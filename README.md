@@ -128,13 +128,20 @@ Crucially, **reliability and file safety are prioritized**:
 ## 5. Project Structure
 
 ```
-file-organizer/
-├── main.py            # Tkinter GUI, event handlers, background threading, and CLI entry
-├── organizer.py       # Scanning engine, duplicate resolver, safety filters, and file moves
-├── categories.py      # Extension-to-category dictionary and mapping helpers
-├── test_organizer.py  # Automated unit test suite validating all scenarios
-├── requirements.txt   # Standard library dependency documentation
-└── README.md          # Complete user guide and technical documentation
+sortly/
+├── main.py             # Tkinter GUI, event handlers, background threading, and CLI entry
+├── organizer.py        # Scanning engine, duplicate resolver, safety filters, and file moves
+├── categories.py       # Extension-to-category dictionary and mapping helpers
+├── test_organizer.py   # Automated unit test suite validating all scenarios
+├── create_sample_files.py  # Generates a sample messy folder for quick testing
+├── make_icon.py        # Zero-dependency generator for the app icon assets
+├── build_exe.py        # PyInstaller wrapper producing a standalone executable
+├── pyproject.toml      # Packaging metadata, entry points, and the dev extra
+├── assets/             # Generated icon assets (sortly.ico, sortly-icon.png)
+├── .github/workflows/  # CI workflow running the test suite on Windows/macOS/Linux
+├── LICENSE             # MIT License
+├── requirements.txt    # Standard library dependency documentation
+└── README.md           # Complete user guide and technical documentation
 ```
 
 ---
@@ -158,6 +165,28 @@ sudo apt-get install python3-tk
 
 ### Windows & macOS
 Python installers from [python.org](https://www.python.org/downloads/) automatically bundle Tkinter. No extra installation is required!
+
+### Install as a Command (Optional)
+Install Sortly as a `sortly` command using [pipx](https://pipx.pypa.io/) or pip:
+```bash
+pipx install .
+# or
+pip install .
+```
+Then simply run:
+```bash
+sortly            # launches the GUI
+sortly --version
+```
+
+### Standalone Executable (No Python Required)
+Build a single-file executable that runs on machines without Python installed:
+```bash
+pip install ".[dev]"
+python build_exe.py            # produces dist/Sortly.exe (dist/Sortly on macOS/Linux)
+python build_exe.py --console  # optional debug build with console output
+```
+The app icon assets are generated automatically by `make_icon.py` if they are missing.
 
 ---
 
