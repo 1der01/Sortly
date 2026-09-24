@@ -37,6 +37,9 @@ try:
 except Exception:
     HAS_TKINTER = False
 
+# Application metadata
+__version__ = "1.0.0"
+
 
 class FileOrganizerGUI:
     """Tkinter Desktop Graphical User Interface for File Organizer."""
@@ -46,6 +49,8 @@ class FileOrganizerGUI:
         self.root.title("Sortly — Organize your files automatically.")
         self.root.geometry("820x680")
         self.root.minsize(700, 560)
+
+        self._apply_window_icon()
 
         # Variables
         self.folder_path_var = tk.StringVar(value="")
@@ -61,6 +66,20 @@ class FileOrganizerGUI:
 
         self._configure_styles()
         self._build_ui()
+
+    def _apply_window_icon(self):
+        """Best-effort window/taskbar icon; silently ignored when unavailable."""
+        try:
+            base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+            png_path = base / "assets" / "sortly-icon.png"
+            ico_path = base / "assets" / "sortly.ico"
+            if png_path.exists():
+                self._icon_image = tk.PhotoImage(file=str(png_path))
+                self.root.iconphoto(True, self._icon_image)
+            elif ico_path.exists():
+                self.root.iconbitmap(str(ico_path))
+        except Exception:
+            pass
 
     def _configure_styles(self):
         style = ttk.Style()
@@ -456,6 +475,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Preview mode without moving files")
     parser.add_argument("--undo", action="store_true", help="Revert previous file moves using the undo journal")
     parser.add_argument("--cli", action="store_true", help="Force command-line interface")
+    parser.add_argument("--version", action="version", version=f"Sortly {__version__}")
 
     args = parser.parse_args()
 

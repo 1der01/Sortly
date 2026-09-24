@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sortly"
+version = "1.0.0"
+description = "Sortly - Organize your files automatically. A safe, zero-dependency desktop file organizer built with Python and Tkinter."
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Jayle Javerick Talplacido" }]
+keywords = ["file-organizer", "desktop", "tkinter", "automation", "productivity", "sorting"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Desktop Environment :: File Managers",
+    "Topic :: Utilities",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pyinstaller>=6.0"]
+
+[project.scripts]
+sortly = "main:main"
+
+[project.gui-scripts]
+sortly-gui = "main:main"
+
+[tool.setuptools]
+py-modules = ["main", "organizer", "categories"]
