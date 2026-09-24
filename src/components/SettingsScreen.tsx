@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 interface SettingsScreenProps {
   onBack: () => void;
@@ -44,6 +44,32 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   onOpenSetupGuide,
 }) => {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const containerRef = useRef<HTMLElement>(null);
+
+  // Close dropdown on click outside or Escape key
+  useEffect(() => {
+    if (!openMenu) return;
+
+    const handleDocumentClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.select-wrap')) {
+        setOpenMenu(null);
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpenMenu(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleDocumentClick);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleDocumentClick);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [openMenu]);
 
   const toggleMenu = (menuId: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -52,10 +78,10 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
 
   return (
     <section
+      ref={containerRef}
       className="screen"
       data-screen="settings"
       data-shown="true"
-      onClick={() => setOpenMenu(null)}
     >
       {/* App Bar */}
       <header className="appbar">
@@ -73,18 +99,24 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             <div className="section-label">General</div>
             <div className="md3-card" style={{ padding: 0 }}>
               {/* Default organization behavior */}
-              <div className="row">
+              <div className="row" style={{ zIndex: openMenu === 'm1' ? 70 : 1, position: 'relative' }}>
                 <div className="row-text">
                   <div className="t">Default organization behavior</div>
                   <div className="d">Choose what happens when you click "Organize files"</div>
                 </div>
-                <div className="select-wrap">
+                <div className="select-wrap" data-active={openMenu === 'm1'}>
                   <button
                     className="select"
                     type="button"
                     aria-haspopup="listbox"
                     aria-expanded={openMenu === 'm1'}
                     onClick={(e) => toggleMenu('m1', e)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setOpenMenu('m1');
+                      }
+                    }}
                   >
                     <span>
                       {defaultBehavior === 'preview'
@@ -93,19 +125,53 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                     </span>
                     <span className="material-symbols-rounded">expand_more</span>
                   </button>
-                  <div className="menu" id="m1" data-open={openMenu === 'm1' ? 'true' : 'false'}>
+                  <div
+                    className="menu"
+                    id="m1"
+                    role="listbox"
+                    aria-label="Default organization behavior"
+                    data-open={openMenu === 'm1' ? 'true' : 'false'}
+                  >
                     <div
                       className="menu-item"
+                      role="option"
+                      tabIndex={openMenu === 'm1' ? 0 : -1}
+                      aria-selected={defaultBehavior === 'preview'}
                       data-selected={defaultBehavior === 'preview' ? 'true' : 'false'}
-                      onClick={() => onSetDefaultBehavior('preview')}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSetDefaultBehavior('preview');
+                        setOpenMenu(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onSetDefaultBehavior('preview');
+                          setOpenMenu(null);
+                        }
+                      }}
                     >
                       <span>Preview first (dry run)</span>
                       <span className="material-symbols-rounded">check</span>
                     </div>
                     <div
                       className="menu-item"
+                      role="option"
+                      tabIndex={openMenu === 'm1' ? 0 : -1}
+                      aria-selected={defaultBehavior === 'immediate'}
                       data-selected={defaultBehavior === 'immediate' ? 'true' : 'false'}
-                      onClick={() => onSetDefaultBehavior('immediate')}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSetDefaultBehavior('immediate');
+                        setOpenMenu(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onSetDefaultBehavior('immediate');
+                          setOpenMenu(null);
+                        }
+                      }}
                     >
                       <span>Organize immediately</span>
                       <span className="material-symbols-rounded">check</span>
@@ -165,20 +231,26 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             <div className="section-label">File handling</div>
             <div className="md3-card" style={{ padding: 0 }}>
               {/* Duplicate behavior */}
-              <div className="row">
+              <div className="row" style={{ zIndex: openMenu === 'm2' ? 70 : 1, position: 'relative' }}>
                 <div className="row-text">
                   <div className="t">Duplicate file behavior</div>
                   <div className="d">
                     What to do when a destination already has a file with the same name
                   </div>
                 </div>
-                <div className="select-wrap">
+                <div className="select-wrap" data-active={openMenu === 'm2'}>
                   <button
                     className="select"
                     type="button"
                     aria-haspopup="listbox"
                     aria-expanded={openMenu === 'm2'}
                     onClick={(e) => toggleMenu('m2', e)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setOpenMenu('m2');
+                      }
+                    }}
                   >
                     <span>
                       {duplicateBehavior === 'rename'
@@ -187,19 +259,53 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                     </span>
                     <span className="material-symbols-rounded">expand_more</span>
                   </button>
-                  <div className="menu" id="m2" data-open={openMenu === 'm2' ? 'true' : 'false'}>
+                  <div
+                    className="menu"
+                    id="m2"
+                    role="listbox"
+                    aria-label="Duplicate file behavior"
+                    data-open={openMenu === 'm2' ? 'true' : 'false'}
+                  >
                     <div
                       className="menu-item"
+                      role="option"
+                      tabIndex={openMenu === 'm2' ? 0 : -1}
+                      aria-selected={duplicateBehavior === 'rename'}
                       data-selected={duplicateBehavior === 'rename' ? 'true' : 'false'}
-                      onClick={() => onSetDuplicateBehavior('rename')}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSetDuplicateBehavior('rename');
+                        setOpenMenu(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onSetDuplicateBehavior('rename');
+                          setOpenMenu(null);
+                        }
+                      }}
                     >
                       <span>Rename automatically</span>
                       <span className="material-symbols-rounded">check</span>
                     </div>
                     <div
                       className="menu-item"
+                      role="option"
+                      tabIndex={openMenu === 'm2' ? 0 : -1}
+                      aria-selected={duplicateBehavior === 'skip'}
                       data-selected={duplicateBehavior === 'skip' ? 'true' : 'false'}
-                      onClick={() => onSetDuplicateBehavior('skip')}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSetDuplicateBehavior('skip');
+                        setOpenMenu(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onSetDuplicateBehavior('skip');
+                          setOpenMenu(null);
+                        }
+                      }}
                     >
                       <span>Skip the file</span>
                       <span className="material-symbols-rounded">check</span>
@@ -209,37 +315,77 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               </div>
 
               {/* Unknown file behavior */}
-              <div className="row">
+              <div className="row" style={{ zIndex: openMenu === 'm3' ? 70 : 1, position: 'relative' }}>
                 <div className="row-text">
                   <div className="t">Unknown file behavior</div>
                   <div className="d">What to do with extensions that don't match a category</div>
                 </div>
-                <div className="select-wrap">
+                <div className="select-wrap" data-active={openMenu === 'm3'}>
                   <button
                     className="select"
                     type="button"
                     aria-haspopup="listbox"
                     aria-expanded={openMenu === 'm3'}
                     onClick={(e) => toggleMenu('m3', e)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setOpenMenu('m3');
+                      }
+                    }}
                   >
                     <span>
                       {unknownBehavior === 'others' ? 'Move to "Others"' : 'Leave in place'}
                     </span>
                     <span className="material-symbols-rounded">expand_more</span>
                   </button>
-                  <div className="menu" id="m3" data-open={openMenu === 'm3' ? 'true' : 'false'}>
+                  <div
+                    className="menu"
+                    id="m3"
+                    role="listbox"
+                    aria-label="Unknown file behavior"
+                    data-open={openMenu === 'm3' ? 'true' : 'false'}
+                  >
                     <div
                       className="menu-item"
+                      role="option"
+                      tabIndex={openMenu === 'm3' ? 0 : -1}
+                      aria-selected={unknownBehavior === 'others'}
                       data-selected={unknownBehavior === 'others' ? 'true' : 'false'}
-                      onClick={() => onSetUnknownBehavior('others')}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSetUnknownBehavior('others');
+                        setOpenMenu(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onSetUnknownBehavior('others');
+                          setOpenMenu(null);
+                        }
+                      }}
                     >
                       <span>Move to "Others"</span>
                       <span className="material-symbols-rounded">check</span>
                     </div>
                     <div
                       className="menu-item"
+                      role="option"
+                      tabIndex={openMenu === 'm3' ? 0 : -1}
+                      aria-selected={unknownBehavior === 'leave'}
                       data-selected={unknownBehavior === 'leave' ? 'true' : 'false'}
-                      onClick={() => onSetUnknownBehavior('leave')}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSetUnknownBehavior('leave');
+                        setOpenMenu(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onSetUnknownBehavior('leave');
+                          setOpenMenu(null);
+                        }
+                      }}
                     >
                       <span>Leave in place</span>
                       <span className="material-symbols-rounded">check</span>

@@ -110,6 +110,33 @@ export default function App() {
   const [pulsingShortcut, setPulsingShortcut] = useState<'ctrl-o' | 'ctrl-enter' | 'esc' | null>(null);
   const pulseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Platform detection for OS-specific keyboard modifier (macOS vs Windows/Linux)
+  const [isMac, setIsMac] = useState<boolean>(() => {
+    if (typeof window !== 'undefined' && typeof navigator !== 'undefined') {
+      const platform =
+        (navigator as any)?.userAgentData?.platform ||
+        navigator.platform ||
+        navigator.userAgent ||
+        '';
+      return /mac|iphone|ipad|ipod/i.test(platform);
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && typeof navigator !== 'undefined') {
+      const platform =
+        (navigator as any)?.userAgentData?.platform ||
+        navigator.platform ||
+        navigator.userAgent ||
+        '';
+      setIsMac(/mac|iphone|ipad|ipod/i.test(platform));
+    }
+  }, []);
+
+  const modifierKeyName = isMac ? 'Command' : 'Ctrl';
+  const modifierSymbol = isMac ? '⌘' : 'Ctrl';
+
   const triggerShortcutPulse = (shortcut: 'ctrl-o' | 'ctrl-enter' | 'esc') => {
     if (pulseTimeoutRef.current) {
       clearTimeout(pulseTimeoutRef.current);
@@ -631,16 +658,19 @@ export default function App() {
             role="button"
             className={`kbd-shortcut ${pulsingShortcut === 'ctrl-o' ? 'kbd-pulsing' : ''}`}
             data-pulsing={pulsingShortcut === 'ctrl-o'}
-            data-tooltip="Open directory selector"
-            title="Open directory selector"
-            aria-label="Ctrl+O: Open directory selector"
+            data-tooltip={`Open directory selector (${modifierKeyName}+O)`}
+            title={`Open directory selector (${modifierKeyName}+O)`}
+            aria-label={`${modifierKeyName}+O: Open directory selector`}
             onClick={() => {
               triggerShortcutPulse('ctrl-o');
               setIsBrowseModalOpen(true);
             }}
           >
-            Ctrl+O
+            {isMac ? '⌘+O' : 'Ctrl+O'}
           </kbd>
+          <span className="shortcut-os-legend" title={`Modifier key on ${isMac ? 'macOS' : 'Windows/Linux'}`}>
+            {modifierKeyName}
+          </span>
           <span>Folder Picker</span>
         </span>
         <span style={{ color: 'var(--outline-variant)' }}>•</span>
@@ -651,9 +681,9 @@ export default function App() {
             role="button"
             className={`kbd-shortcut ${pulsingShortcut === 'ctrl-enter' ? 'kbd-pulsing' : ''}`}
             data-pulsing={pulsingShortcut === 'ctrl-enter'}
-            data-tooltip="Start organization workflow"
-            title="Start organization workflow"
-            aria-label="Ctrl+Enter: Start organization workflow"
+            data-tooltip={`Start organization workflow (${modifierKeyName}+Enter)`}
+            title={`Start organization workflow (${modifierKeyName}+Enter)`}
+            aria-label={`${modifierKeyName}+Enter: Start organization workflow`}
             onClick={() => {
               triggerShortcutPulse('ctrl-enter');
               if (activeScreen === 'dashboard') {
@@ -663,8 +693,11 @@ export default function App() {
               }
             }}
           >
-            Ctrl+↵
+            {isMac ? '⌘+↵' : 'Ctrl+↵'}
           </kbd>
+          <span className="shortcut-os-legend" title={`Modifier key on ${isMac ? 'macOS' : 'Windows/Linux'}`}>
+            {modifierKeyName}
+          </span>
           <span>Organize Files</span>
         </span>
         <span style={{ color: 'var(--outline-variant)' }}>•</span>
@@ -675,8 +708,8 @@ export default function App() {
             role="button"
             className={`kbd-shortcut ${pulsingShortcut === 'esc' ? 'kbd-pulsing' : ''}`}
             data-pulsing={pulsingShortcut === 'esc'}
-            data-tooltip="Close active modals or return to dashboard"
-            title="Close active modals or return to dashboard"
+            data-tooltip="Close active modals or return to dashboard (Esc)"
+            title="Close active modals or return to dashboard (Esc)"
             aria-label="Esc: Close active modals or return to dashboard"
             onClick={() => {
               triggerShortcutPulse('esc');
@@ -691,6 +724,9 @@ export default function App() {
           >
             Esc
           </kbd>
+          <span className="shortcut-os-legend" title="Escape key">
+            Escape
+          </span>
           <span>Close Modals</span>
         </span>
       </footer>
