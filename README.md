@@ -1,5 +1,7 @@
 # Sortly
 
+[![Tests](https://github.com/1der01/Sortly/actions/workflows/tests.yml/badge.svg)](https://github.com/1der01/Sortly/actions/workflows/tests.yml)
+
 > **Organize your files automatically.**
 
 Sortly is a lightweight, reliable desktop application built with Python and Tkinter that automatically scans and organizes files in any cluttered directory (such as your Downloads or Desktop folder) into structured, categorized subfolders based on file extensions.
@@ -166,18 +168,28 @@ Simply run `main.py`:
 ```bash
 python3 main.py
 ```
+You can also launch the GUI with a folder pre-loaded:
+```bash
+python3 main.py /path/to/your/folder
+```
 
 ### Command-Line Interface (CLI / Headless)
-You can also run the organizer directly from the terminal:
+When a display is available, `main.py` opens the GUI by default. Pass `--cli` to force
+terminal mode (CLI is also used automatically on headless systems without a display):
 
 **Dry Run Preview (Recommended first):**
 ```bash
-python3 main.py /path/to/your/folder --dry-run
+python3 main.py --cli /path/to/your/folder --dry-run
 ```
 
 **Perform Actual Organization:**
 ```bash
-python3 main.py /path/to/your/folder
+python3 main.py --cli /path/to/your/folder
+```
+
+**Undo the Last Organization:**
+```bash
+python3 main.py /path/to/your/folder --undo
 ```
 
 ### Run Automated Tests
@@ -282,3 +294,9 @@ Downloads/
 - **Undo Operation**: Maintain a transactional journal file allowing one-click rollback of the last move operation.
 - **MIME Type Magic Byte Detection**: Optionally inspect file header signatures (`python-magic`) to classify files with incorrect or missing extensions.
 - **Desktop Shortcut & Drag-and-Drop**: Support dragging folders directly onto the application window.
+
+---
+
+## 12. License
+
+Released under the [MIT License](LICENSE).
