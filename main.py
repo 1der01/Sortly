@@ -12,6 +12,8 @@ Features:
 8. CLI fallback mode for headless environments or terminal workflows
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import threading

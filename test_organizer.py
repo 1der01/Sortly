@@ -197,5 +197,110 @@ class TestFileOrganizer(unittest.TestCase):
         self.assertFalse((self.test_dir / "Audio").exists())
 
 
+    def test_undo_does_not_overwrite_recreated_file(self):
+        """Undo must never overwrite a new file that reused the original name."""
+        (self.test_dir / "invoice.pdf").write_text("ORIGINAL-INVOICE", encoding="utf-8")
+
+        summary = organize_folder(self.test_dir, dry_run=False)
+        self.assertEqual(summary.moved_count, 1)
+
+        # Simulate a new file appearing at the original path after organizing
+        (self.test_dir / "invoice.pdf").write_text("NEW-INVOICE", encoding="utf-8")
+
+        reverted, errors = undo_organization(self.test_dir)
+        self.assertEqual(reverted, 1)
+        self.assertEqual(errors, 0)
+
+        # The new file must be untouched, and the organized file restored with a suffix
+        self.assertEqual((self.test_dir / "invoice.pdf").read_text(encoding="utf-8"), "NEW-INVOICE")
+        self.assertEqual((self.test_dir / "invoice (1).pdf").read_text(encoding="utf-8"), "ORIGINAL-INVOICE")
+
+    def test_undo_missing_destination_reports_error(self):
+        """Undo reports an error without crashing when a categorized file is gone."""
+        (self.test_dir / "report.pdf").write_text("data", encoding="utf-8")
+        organize_folder(self.test_dir, dry_run=False)
+
+        # Simulate the user deleting the file from its category folder
+        (self.test_dir / "Documents" / "report.pdf").unlink()
+
+        reverted, errors = undo_organization(self.test_dir)
+        self.assertEqual(reverted, 0)
+        self.assertEqual(errors, 1)
+
+    def test_undo_without_journal_is_safe(self):
+        """Undo on a folder with no journal must be a safe no-op."""
+        reverted, errors = undo_organization(self.test_dir)
+        self.assertEqual((reverted, errors), (0, 0))
+
+    def test_organize_empty_folder(self):
+        """An empty folder produces zero counts and no undo journal."""
+        summary = organize_folder(self.test_dir, dry_run=False)
+        self.assertEqual(summary.scanned_count, 0)
+        self.assertEqual(summary.moved_count, 0)
+        self.assertEqual(summary.error_count, 0)
+        self.assertFalse((self.test_dir / ".organizer_undo.json").exists())
+
+    def test_organize_path_that_is_a_file(self):
+        """Passing a file path instead of a directory surfaces a single error."""
+        file_path = self.test_dir / "not_a_folder.txt"
+        file_path.write_text("just a file", encoding="utf-8")
+
+        summary = organize_folder(file_path, dry_run=False)
+        self.assertEqual(summary.error_count, 1)
+        self.assertEqual(summary.moved_count, 0)
+
+    def test_dry_run_duplicate_planning(self):
+        """Dry run plans duplicate-safe names without touching the filesystem."""
+        docs = self.test_dir / "Documents"
+        docs.mkdir()
+        (docs / "report.pdf").write_text("existing", encoding="utf-8")
+        (self.test_dir / "report.pdf").write_text("incoming", encoding="utf-8")
+
+        summary = organize_folder(self.test_dir, dry_run=True)
+
+        moved_actions = [a for a in summary.actions if a.status == "dry_run"]
+        self.assertEqual(summary.moved_count, 1)
+        self.assertEqual(len(moved_actions), 1)
+        self.assertTrue(moved_actions[0].is_duplicate_renamed)
+        self.assertEqual(moved_actions[0].destination.name, "report (1).pdf")
+
+        # Nothing on disk may change during a dry run
+        self.assertTrue((self.test_dir / "report.pdf").exists())
+        self.assertEqual((docs / "report.pdf").read_text(encoding="utf-8"), "existing")
+        self.assertFalse((docs / "report (1).pdf").exists())
+        self.assertFalse((self.test_dir / ".organizer_undo.json").exists())
+
+    def test_undo_journal_is_valid_json_with_timestamp(self):
+        """The undo journal is valid JSON stamped with an ISO timestamp."""
+        import json
+
+        (self.test_dir / "song.mp3").write_text("audio", encoding="utf-8")
+        organize_folder(self.test_dir, dry_run=False)
+
+        journal_path = self.test_dir / ".organizer_undo.json"
+        self.assertTrue(journal_path.exists())
+
+        data = json.loads(journal_path.read_text(encoding="utf-8"))
+        self.assertIn("timestamp", data)
+        self.assertIn("T", data["timestamp"])  # ISO 8601 date-time separator
+        self.assertEqual(len(data["moves"]), 1)
+        self.assertEqual(data["moves"][0]["category"], "Audio")
+
+
+    def test_undo_accepts_progress_callback(self):
+        """Undo must accept the same progress_callback keyword as organize_folder."""
+        (self.test_dir / "notes.txt").write_text("hello", encoding="utf-8")
+        organize_folder(self.test_dir, dry_run=False)
+
+        messages = []
+        reverted, errors = undo_organization(
+            self.test_dir,
+            progress_callback=lambda msg, level: messages.append((msg, level)),
+        )
+        self.assertEqual(reverted, 1)
+        self.assertEqual(errors, 0)
+        self.assertTrue(any("Restored" in msg for msg, _ in messages))
+
+
 if __name__ == "__main__":
     unittest.main()

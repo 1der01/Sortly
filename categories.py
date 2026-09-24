@@ -5,6 +5,8 @@ This module defines the mapping between file extensions and their target categor
 Unsupported or unrecognized extensions are automatically assigned to the "Others" category.
 """
 
+from __future__ import annotations
+
 from typing import Dict, List, Optional
 
 # Supported categories with their associated lowercase file extensions (without leading dot).

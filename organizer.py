@@ -10,9 +10,13 @@ Technical Highlights:
 - Provides comprehensive tracking of scanned, moved, skipped, and errored files.
 """
 
-from dataclasses import dataclass, field
-from pathlib import Path
+from __future__ import annotations
+
+import json
 import shutil
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
 from categories import DEFAULT_CATEGORY, get_all_categories, get_category_for_extension
@@ -23,7 +27,7 @@ SYSTEM_FILES = {
     "desktop.ini",
     ".ds_store",
     "ehthumbs.db",
-    "icon\r",
+    "icon\r",  # macOS custom folder icon file is literally named "Icon" + CR
     "$recycle.bin",
 }
 
@@ -316,7 +320,6 @@ def save_undo_journal(summary: OrganizationSummary) -> Optional[Path]:
     Saves an undo journal recording the original source and destination
     for all relocated files, providing human peace of mind and 1-click rollback.
     """
-    import json
     try:
         journal_path = get_undo_journal_path(summary.folder_path)
         records = [
@@ -330,7 +333,11 @@ def save_undo_journal(summary: OrganizationSummary) -> Optional[Path]:
             if a.status == "moved"
         ]
         with open(journal_path, "w", encoding="utf-8") as f:
-            json.dump({"timestamp": Path(__file__).stat().st_mtime, "moves": records}, f, indent=2)
+            json.dump(
+                {"timestamp": datetime.now().isoformat(timespec="seconds"), "moves": records},
+                f,
+                indent=2,
+            )
         return journal_path
     except Exception:
         return None
@@ -338,7 +345,7 @@ def save_undo_journal(summary: OrganizationSummary) -> Optional[Path]:
 
 def undo_organization(
     folder_path: Path,
-    log_callback: Optional[Callable[[str, str], None]] = None
+    progress_callback: Optional[Callable[[str, str], None]] = None
 ) -> Tuple[int, int]:
     """
     Reverses the last organization run, moving all categorized files
@@ -347,11 +354,9 @@ def undo_organization(
     Returns:
         Tuple of (reverted_count, error_count)
     """
-    import json
-
     def log(msg: str, level: str = "info"):
-        if log_callback:
-            log_callback(msg, level)
+        if progress_callback:
+            progress_callback(msg, level)
 
     journal_path = get_undo_journal_path(folder_path)
     if not journal_path.exists():
@@ -384,9 +389,18 @@ def undo_organization(
             continue
 
         try:
-            # Move back to original source path
-            shutil.move(str(dest_curr), str(src_orig))
-            log(f"Restored '{src_orig.name}' back to root folder.", "success")
+            # Move back to the original path without ever overwriting a file
+            # that may have been recreated there since the organization ran.
+            restore_target, was_renamed = get_unique_destination_path(src_orig.parent, src_orig.name)
+            shutil.move(str(dest_curr), str(restore_target))
+            if was_renamed:
+                log(
+                    f"Restored '{dest_curr.name}' as '{restore_target.name}' "
+                    f"(original name already in use; renamed to avoid overwrite).",
+                    "warning",
+                )
+            else:
+                log(f"Restored '{src_orig.name}' back to root folder.", "success")
             reverted += 1
         except Exception as e:
             log(f"Error restoring '{dest_curr.name}': {e}", "error")
