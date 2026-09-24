@@ -1,0 +1,6 @@
+{
+  "name": "Sortly",
+  "description": "Organize your files automatically.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

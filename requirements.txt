@@ -1,0 +1,10 @@
+# Desktop File Organizer - Requirements
+# Python 3.8 or higher is required.
+# All core libraries (pathlib, shutil, tkinter, threading, dataclasses, argparse)
+# are part of the Python Standard Library. No third-party pip packages are needed!
+
+# Note for Linux users:
+# If tkinter is not installed by default on your distribution, install it via:
+#   Ubuntu/Debian: sudo apt-get install python3-tk
+#   Fedora/RHEL:   sudo dnf install python3-tkinter
+#   Arch Linux:    sudo pacman -S tk
