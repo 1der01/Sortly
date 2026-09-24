@@ -1,8 +1,17 @@
-node_modules/
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Build artifacts
 build/
 dist/
-coverage/
+
+# Environment & secrets
+.env
+
+# OS / logs
 .DS_Store
 *.log
-.env*
-!.env.example
