@@ -7,7 +7,7 @@ Unsupported or unrecognized extensions are automatically assigned to the "Others
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 # Supported categories with their associated lowercase file extensions (without leading dot).
 CATEGORY_MAPPINGS: Dict[str, List[str]] = {
@@ -47,13 +47,14 @@ for category, extensions in CATEGORY_MAPPINGS.items():
         _EXTENSION_LOOKUP[ext.lower()] = category
 
 
-def get_category_for_extension(extension: Optional[str]) -> str:
+def get_category_for_extension(extension: Optional[str], custom_categories: Optional[Dict[str, List[str]]] = None) -> str:
     """
     Returns the category name for a given file extension.
 
     Args:
         extension: The file extension (with or without leading dot, case-insensitive).
                    Can be None or empty string.
+        custom_categories: Optional dictionary of custom category mappings to override/extend defaults.
 
     Returns:
         The matched category name, or "Others" if not recognized or extension is absent.
@@ -77,17 +78,33 @@ def get_category_for_extension(extension: Optional[str]) -> str:
     if not cleaned_ext:
         return DEFAULT_CATEGORY
 
+    # Check custom categories first if provided
+    if custom_categories:
+        for category, extensions in custom_categories.items():
+            if cleaned_ext in [ext.lower() for ext in extensions]:
+                return category
+
     return _EXTENSION_LOOKUP.get(cleaned_ext, DEFAULT_CATEGORY)
 
 
-def get_all_categories() -> List[str]:
+def get_all_categories(custom_categories: Optional[Dict[str, List[str]]] = None) -> List[str]:
     """
     Returns a sorted list of all configured category names including 'Others'.
+    
+    Args:
+        custom_categories: Optional dictionary of custom categories to include.
     """
     categories = list(CATEGORY_MAPPINGS.keys())
+    
+    # Add custom categories if provided
+    if custom_categories:
+        categories.extend(custom_categories.keys())
+    
     if DEFAULT_CATEGORY not in categories:
         categories.append(DEFAULT_CATEGORY)
-    return categories
+    
+    # Remove duplicates and sort
+    return sorted(list(set(categories)))
 
 
 def get_extensions_for_category(category: str) -> List[str]:

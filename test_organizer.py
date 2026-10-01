@@ -295,7 +295,7 @@ class TestFileOrganizer(unittest.TestCase):
         messages = []
         reverted, errors = undo_organization(
             self.test_dir,
-            progress_callback=lambda msg, level: messages.append((msg, level)),
+            progress_callback=lambda msg, level, file_size=0: messages.append((msg, level)),
         )
         self.assertEqual(reverted, 1)
         self.assertEqual(errors, 0)

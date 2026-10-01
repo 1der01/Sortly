@@ -17,9 +17,11 @@ import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from categories import DEFAULT_CATEGORY, get_all_categories, get_category_for_extension
+from config import get_config
+import time
 
 # Known system files that should be ignored during organization
 SYSTEM_FILES = {
@@ -41,6 +43,7 @@ class OrganizationAction:
     status: str  # 'moved', 'dry_run', 'skipped', 'error'
     message: str
     is_duplicate_renamed: bool = False
+    file_size: int = 0  # File size in bytes
 
 
 @dataclass
@@ -75,6 +78,34 @@ def is_hidden_or_system_file(path: Path) -> bool:
     if name in SYSTEM_FILES:
         return True
 
+    return False
+
+
+def safe_move_with_retry(source: Path, destination: Path, max_retries: int = 3, retry_delay: float = 0.5) -> bool:
+    """
+    Move a file with retry logic for handling locked files.
+    
+    Args:
+        source: Source file path.
+        destination: Destination file path.
+        max_retries: Maximum number of retry attempts.
+        retry_delay: Delay between retries in seconds.
+    
+    Returns:
+        True if move succeeded, False otherwise.
+    """
+    for attempt in range(max_retries):
+        try:
+            shutil.move(str(source), str(destination))
+            return True
+        except PermissionError as pe:
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+                continue
+            else:
+                raise pe
+        except Exception as e:
+            raise e
     return False
 
 
@@ -141,7 +172,10 @@ def scan_directory(folder_path: Path) -> Tuple[List[Path], List[Path]]:
 def organize_folder(
     folder_path: Path,
     dry_run: bool = False,
-    progress_callback: Optional[Callable[[str, str], None]] = None
+    progress_callback: Optional[Callable[[str, str, int], None]] = None,
+    custom_categories: Optional[Dict[str, List[str]]] = None,
+    skip_large_files: bool = False,
+    max_file_size_mb: int = 100
 ) -> OrganizationSummary:
     """
     Scans and organizes all files in folder_path into categorized subdirectories.
@@ -150,15 +184,18 @@ def organize_folder(
         folder_path: Path to the target directory.
         dry_run: If True, simulates moves without touching the filesystem.
         progress_callback: Optional callback receiving (message, level) for live GUI updates.
+        custom_categories: Optional dictionary of custom category mappings.
+        skip_large_files: If True, skip files larger than max_file_size_mb.
+        max_file_size_mb: Maximum file size in MB when skip_large_files is True.
 
     Returns:
         OrganizationSummary containing counts, action logs, and errors.
     """
     summary = OrganizationSummary(folder_path=folder_path, is_dry_run=dry_run)
 
-    def log(message: str, level: str = "info"):
+    def log(message: str, level: str = "info", file_size: int = 0) -> None:
         if progress_callback:
-            progress_callback(message, level)
+            progress_callback(message, level, file_size)
 
     # Path validation
     if not folder_path.exists():
@@ -198,16 +235,18 @@ def organize_folder(
 
     for item in skipped_items:
         reason = "Subdirectory" if item.is_dir() else "Hidden/System file"
+        file_size = item.stat().st_size if item.is_file() else 0
         summary.actions.append(
             OrganizationAction(
                 source=item,
                 destination=item,
                 category="N/A",
                 status="skipped",
-                message=f"Skipped {reason}: {item.name}"
+                message=f"Skipped {reason}: {item.name}",
+                file_size=file_size
             )
         )
-        log(f"Skipped {reason.lower()}: {item.name}", "skipped")
+        log(f"Skipped {reason.lower()}: {item.name}", "skipped", file_size)
 
     if not files_to_process:
         log(f"{mode_label}No eligible files found to organize.", "warning")
@@ -221,9 +260,27 @@ def organize_folder(
 
     for file_path in files_to_process:
         try:
+            # Check file size if skip_large_files is enabled
+            file_size = file_path.stat().st_size
+            if skip_large_files:
+                file_size_mb = file_size / (1024 * 1024)
+                if file_size_mb > max_file_size_mb:
+                    summary.skipped_count += 1
+                    action = OrganizationAction(
+                        source=file_path,
+                        destination=file_path,
+                        category="N/A",
+                        status="skipped",
+                        message=f"Skipped large file ({file_size_mb:.1f}MB > {max_file_size_mb}MB): {file_path.name}",
+                        file_size=file_size
+                    )
+                    summary.actions.append(action)
+                    log(f"Skipped large file ({file_size_mb:.1f}MB): {file_path.name}", "skipped", file_size)
+                    continue
+            
             # 1. Determine category based on extension
             extension = file_path.suffix
-            category = get_category_for_extension(extension)
+            category = get_category_for_extension(extension, custom_categories)
             target_dir = folder_path / category
 
             # 2. Check duplicate / non-colliding destination path
@@ -239,21 +296,23 @@ def organize_folder(
             # Check if file is already in its destination (edge case where target == source)
             if target_path.resolve() == file_path.resolve():
                 summary.skipped_count += 1
+                file_size = file_path.stat().st_size
                 action = OrganizationAction(
                     source=file_path,
                     destination=target_path,
                     category=category,
                     status="skipped",
-                    message=f"Already in {category}: {file_path.name}"
+                    message=f"Already in {category}: {file_path.name}",
+                    file_size=file_size
                 )
                 summary.actions.append(action)
-                log(f"Already in correct location: {file_path.name}", "skipped")
+                log(f"Already in correct location: {file_path.name}", "skipped", file_size)
                 continue
 
             # 3. Perform move or log dry run
             if dry_run:
                 rename_notice = f" (renamed to '{target_path.name}' to avoid duplicate)" if is_renamed else ""
-                log(f"[Dry Run] Would move '{file_path.name}' -> '{category}/{target_path.name}'{rename_notice}", "dry_run")
+                log(f"[Dry Run] Would move '{file_path.name}' -> '{category}/{target_path.name}'{rename_notice}", "dry_run", file_size)
                 summary.moved_count += 1
                 action = OrganizationAction(
                     source=file_path,
@@ -261,24 +320,32 @@ def organize_folder(
                     category=category,
                     status="dry_run",
                     message=f"Would move to {category}/{target_path.name}{rename_notice}",
-                    is_duplicate_renamed=is_renamed
+                    is_duplicate_renamed=is_renamed,
+                    file_size=file_size
                 )
                 summary.actions.append(action)
             else:
-                # Safe move using shutil
-                shutil.move(str(file_path), str(target_path))
-                rename_notice = f" (renamed to '{target_path.name}' to prevent overwrite)" if is_renamed else ""
-                log(f"Moved '{file_path.name}' -> '{category}/{target_path.name}'{rename_notice}", "success")
-                summary.moved_count += 1
-                action = OrganizationAction(
-                    source=file_path,
-                    destination=target_path,
-                    category=category,
-                    status="moved",
-                    message=f"Moved to {category}/{target_path.name}{rename_notice}",
-                    is_duplicate_renamed=is_renamed
-                )
-                summary.actions.append(action)
+                # Safe move using shutil with retry logic
+                try:
+                    safe_move_with_retry(file_path, target_path)
+                    rename_notice = f" (renamed to '{target_path.name}' to prevent overwrite)" if is_renamed else ""
+                    log(f"Moved '{file_path.name}' -> '{category}/{target_path.name}'{rename_notice}", "success", file_size)
+                    summary.moved_count += 1
+                    action = OrganizationAction(
+                        source=file_path,
+                        destination=target_path,
+                        category=category,
+                        status="moved",
+                        message=f"Moved to {category}/{target_path.name}{rename_notice}",
+                        is_duplicate_renamed=is_renamed,
+                        file_size=file_size
+                    )
+                    summary.actions.append(action)
+                except PermissionError as pe:
+                    err_msg = f"File locked (retried 3 times): '{file_path.name}': {pe}"
+                    summary.error_count += 1
+                    summary.errors.append((file_path.name, err_msg))
+                    log(f"ERROR: {err_msg}", "error")
 
         except PermissionError as pe:
             err_msg = f"Permission denied for '{file_path.name}': {pe}"
@@ -328,6 +395,7 @@ def save_undo_journal(summary: OrganizationSummary) -> Optional[Path]:
                 "destination": str(a.destination.resolve()),
                 "category": a.category,
                 "is_duplicate_renamed": a.is_duplicate_renamed,
+                "file_size": a.file_size,
             }
             for a in summary.actions
             if a.status == "moved"
@@ -345,7 +413,7 @@ def save_undo_journal(summary: OrganizationSummary) -> Optional[Path]:
 
 def undo_organization(
     folder_path: Path,
-    progress_callback: Optional[Callable[[str, str], None]] = None
+    progress_callback: Optional[Callable[[str, str, int], None]] = None
 ) -> Tuple[int, int]:
     """
     Reverses the last organization run, moving all categorized files
@@ -354,9 +422,9 @@ def undo_organization(
     Returns:
         Tuple of (reverted_count, error_count)
     """
-    def log(msg: str, level: str = "info"):
+    def log(msg: str, level: str = "info", file_size: int = 0) -> None:
         if progress_callback:
-            progress_callback(msg, level)
+            progress_callback(msg, level, file_size)
 
     journal_path = get_undo_journal_path(folder_path)
     if not journal_path.exists():
