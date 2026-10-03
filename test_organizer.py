@@ -196,6 +196,55 @@ class TestFileOrganizer(unittest.TestCase):
         self.assertFalse((self.test_dir / "Documents").exists())
         self.assertFalse((self.test_dir / "Audio").exists())
 
+    def test_group_by_date_and_undo(self):
+        """Test organizing files into date-based subfolders and undoing it."""
+        from datetime import datetime
+        file1 = self.test_dir / "budget.xlsx"
+        file1.write_text("Budget 2024", encoding="utf-8")
+        
+        mtime = datetime.fromtimestamp(file1.stat().st_mtime)
+        expected_date_str = mtime.strftime("%Y-%m")
+
+        summary = organize_folder(self.test_dir, dry_run=False, group_by_date=True)
+        self.assertEqual(summary.error_count, 0)
+        self.assertEqual(summary.moved_count, 1)
+
+        expected_dest = self.test_dir / "Documents" / expected_date_str / "budget.xlsx"
+        self.assertTrue(expected_dest.exists())
+
+        # Test Undo of date-organized files
+        reverted, errors = undo_organization(self.test_dir)
+        self.assertEqual(reverted, 1)
+        self.assertEqual(errors, 0)
+        self.assertTrue((self.test_dir / "budget.xlsx").exists())
+        self.assertFalse((self.test_dir / "Documents").exists())
+
+    def test_custom_config_and_ignored_extensions(self):
+        """Verify custom categories and ignored extensions from config."""
+        from categories import SortlyConfig
+        cfg = SortlyConfig(
+            mappings={"3D Models": ["stl", "obj"]},
+            ignored_extensions=["tmp", "crdownload"]
+        )
+
+        (self.test_dir / "gear.stl").write_text("STL binary data", encoding="utf-8")
+        (self.test_dir / "incomplete.tmp").write_text("temporary data", encoding="utf-8")
+
+        summary = organize_folder(self.test_dir, dry_run=False, config=cfg)
+        self.assertEqual(summary.error_count, 0)
+        self.assertEqual(summary.moved_count, 1)
+        self.assertEqual(summary.skipped_count, 1)
+
+        # gear.stl moved to custom '3D Models' folder
+        self.assertTrue((self.test_dir / "3D Models" / "gear.stl").exists())
+        # incomplete.tmp remained untouched in root
+        self.assertTrue((self.test_dir / "incomplete.tmp").exists())
+
+    def test_open_folder_invalid_path(self):
+        """Verify open_folder_in_explorer handles missing directory safely."""
+        from organizer import open_folder_in_explorer
+        self.assertFalse(open_folder_in_explorer(self.test_dir / "non_existent_folder_abc"))
+
 
     def test_undo_does_not_overwrite_recreated_file(self):
         """Undo must never overwrite a new file that reused the original name."""

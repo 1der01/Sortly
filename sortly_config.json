@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Sortly Desktop File Organizer Configuration",
+  "categories": {
+    "3D Models": [
+      "stl",
+      "obj",
+      "fbx",
+      "blend",
+      "3mf",
+      "step"
+    ],
+    "Design": [
+      "psd",
+      "ai",
+      "fig",
+      "sketch",
+      "xd"
+    ],
+    "Documents": [
+      "pdf",
+      "docx",
+      "txt",
+      "xlsx",
+      "csv",
+      "pptx",
+      "md"
+    ]
+  },
+  "ignored_extensions": [
+    "tmp",
+    "crdownload",
+    "part",
+    "download"
+  ],
+  "date_format": "%Y-%m"
+}

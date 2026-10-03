@@ -10,18 +10,20 @@ Technical Highlights:
 - Provides comprehensive tracking of scanned, moved, skipped, and errored files.
 """
 
-from __future__ import annotations
-
-import json
-import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
+import os
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+import shutil
+from typing import Callable, List, Optional, Tuple
 
-from categories import DEFAULT_CATEGORY, get_all_categories, get_category_for_extension
-from config import get_config
-import time
+from categories import (
+    DEFAULT_CATEGORY,
+    SortlyConfig,
+    get_all_categories,
+    get_category_for_extension,
+    load_sortly_config,
+)
 
 # Known system files that should be ignored during organization
 SYSTEM_FILES = {
@@ -29,7 +31,7 @@ SYSTEM_FILES = {
     "desktop.ini",
     ".ds_store",
     "ehthumbs.db",
-    "icon\r",  # macOS custom folder icon file is literally named "Icon" + CR
+    "icon\r",
     "$recycle.bin",
 }
 
@@ -43,7 +45,6 @@ class OrganizationAction:
     status: str  # 'moved', 'dry_run', 'skipped', 'error'
     message: str
     is_duplicate_renamed: bool = False
-    file_size: int = 0  # File size in bytes
 
 
 @dataclass
@@ -78,34 +79,6 @@ def is_hidden_or_system_file(path: Path) -> bool:
     if name in SYSTEM_FILES:
         return True
 
-    return False
-
-
-def safe_move_with_retry(source: Path, destination: Path, max_retries: int = 3, retry_delay: float = 0.5) -> bool:
-    """
-    Move a file with retry logic for handling locked files.
-    
-    Args:
-        source: Source file path.
-        destination: Destination file path.
-        max_retries: Maximum number of retry attempts.
-        retry_delay: Delay between retries in seconds.
-    
-    Returns:
-        True if move succeeded, False otherwise.
-    """
-    for attempt in range(max_retries):
-        try:
-            shutil.move(str(source), str(destination))
-            return True
-        except PermissionError as pe:
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay)
-                continue
-            else:
-                raise pe
-        except Exception as e:
-            raise e
     return False
 
 
@@ -169,13 +142,36 @@ def scan_directory(folder_path: Path) -> Tuple[List[Path], List[Path]]:
     return valid_files, skipped_entries
 
 
+def open_folder_in_explorer(folder_path: Path) -> bool:
+    """
+    Opens the specified folder in the native OS file explorer
+    (Windows Explorer, macOS Finder, or Linux file manager).
+    """
+    import platform
+    import subprocess
+    try:
+        resolved = Path(folder_path).resolve()
+        if not resolved.exists() or not resolved.is_dir():
+            return False
+        sys_name = platform.system()
+        if sys_name == "Windows":
+            os.startfile(str(resolved))
+        elif sys_name == "Darwin":
+            subprocess.Popen(["open", str(resolved)])
+        else:
+            subprocess.Popen(["xdg-open", str(resolved)])
+        return True
+    except Exception:
+        return False
+
+
 def organize_folder(
     folder_path: Path,
     dry_run: bool = False,
-    progress_callback: Optional[Callable[[str, str, int], None]] = None,
-    custom_categories: Optional[Dict[str, List[str]]] = None,
-    skip_large_files: bool = False,
-    max_file_size_mb: int = 100
+    group_by_date: bool = False,
+    config: Optional[SortlyConfig] = None,
+    config_path: Optional[Path] = None,
+    progress_callback: Optional[Callable[[str, str], None]] = None
 ) -> OrganizationSummary:
     """
     Scans and organizes all files in folder_path into categorized subdirectories.
@@ -183,19 +179,19 @@ def organize_folder(
     Args:
         folder_path: Path to the target directory.
         dry_run: If True, simulates moves without touching the filesystem.
+        group_by_date: If True, nests files into Year-Month subfolders under category.
+        config: Optional pre-loaded SortlyConfig instance.
+        config_path: Optional path to a custom sortly_config.json file.
         progress_callback: Optional callback receiving (message, level) for live GUI updates.
-        custom_categories: Optional dictionary of custom category mappings.
-        skip_large_files: If True, skip files larger than max_file_size_mb.
-        max_file_size_mb: Maximum file size in MB when skip_large_files is True.
 
     Returns:
         OrganizationSummary containing counts, action logs, and errors.
     """
     summary = OrganizationSummary(folder_path=folder_path, is_dry_run=dry_run)
 
-    def log(message: str, level: str = "info", file_size: int = 0) -> None:
+    def log(message: str, level: str = "info"):
         if progress_callback:
-            progress_callback(message, level, file_size)
+            progress_callback(message, level)
 
     # Path validation
     if not folder_path.exists():
@@ -212,8 +208,16 @@ def organize_folder(
         log(f"ERROR: {err_msg}", "error")
         return summary
 
+    # Load configuration
+    active_config = config
+    if active_config is None:
+        active_config, loaded_from = load_sortly_config(custom_path=config_path, search_folder=folder_path)
+        if loaded_from:
+            log(f"Active configuration loaded from: {loaded_from}", "info")
+    
     mode_label = "[DRY RUN] " if dry_run else ""
-    log(f"{mode_label}Starting file scan in: {folder_path}", "info")
+    date_label = " (with Date Sub-grouping)" if group_by_date else ""
+    log(f"{mode_label}Starting file scan in: {folder_path}{date_label}", "info")
 
     try:
         files_to_process, skipped_items = scan_directory(folder_path)
@@ -235,18 +239,16 @@ def organize_folder(
 
     for item in skipped_items:
         reason = "Subdirectory" if item.is_dir() else "Hidden/System file"
-        file_size = item.stat().st_size if item.is_file() else 0
         summary.actions.append(
             OrganizationAction(
                 source=item,
                 destination=item,
                 category="N/A",
                 status="skipped",
-                message=f"Skipped {reason}: {item.name}",
-                file_size=file_size
+                message=f"Skipped {reason}: {item.name}"
             )
         )
-        log(f"Skipped {reason.lower()}: {item.name}", "skipped", file_size)
+        log(f"Skipped {reason.lower()}: {item.name}", "skipped")
 
     if not files_to_process:
         log(f"{mode_label}No eligible files found to organize.", "warning")
@@ -260,30 +262,36 @@ def organize_folder(
 
     for file_path in files_to_process:
         try:
-            # Check file size if skip_large_files is enabled
-            file_size = file_path.stat().st_size
-            if skip_large_files:
-                file_size_mb = file_size / (1024 * 1024)
-                if file_size_mb > max_file_size_mb:
-                    summary.skipped_count += 1
-                    action = OrganizationAction(
-                        source=file_path,
-                        destination=file_path,
-                        category="N/A",
-                        status="skipped",
-                        message=f"Skipped large file ({file_size_mb:.1f}MB > {max_file_size_mb}MB): {file_path.name}",
-                        file_size=file_size
-                    )
-                    summary.actions.append(action)
-                    log(f"Skipped large file ({file_size_mb:.1f}MB): {file_path.name}", "skipped", file_size)
-                    continue
-            
-            # 1. Determine category based on extension
+            # Check if file extension is ignored by config
             extension = file_path.suffix
-            category = get_category_for_extension(extension, custom_categories)
-            target_dir = folder_path / category
+            if active_config.is_ignored_extension(extension):
+                summary.skipped_count += 1
+                action = OrganizationAction(
+                    source=file_path,
+                    destination=file_path,
+                    category="Ignored",
+                    status="skipped",
+                    message=f"Skipped ignored extension: {file_path.name}"
+                )
+                summary.actions.append(action)
+                log(f"Skipped ignored extension: {file_path.name}", "skipped")
+                continue
 
-            # 2. Check duplicate / non-colliding destination path
+            # 1. Determine category based on extension and active config
+            category = get_category_for_extension(extension, config=active_config)
+
+            # 2. Determine target directory (with optional date subfolder)
+            if group_by_date:
+                try:
+                    mtime = datetime.fromtimestamp(file_path.stat().st_mtime)
+                    date_folder = mtime.strftime(active_config.date_format or "%Y-%m")
+                    target_dir = folder_path / category / date_folder
+                except Exception:
+                    target_dir = folder_path / category
+            else:
+                target_dir = folder_path / category
+
+            # 3. Check duplicate / non-colliding destination path
             if dry_run:
                 # In dry run, check both real filesystem and simulated targets
                 target_path, is_renamed = _resolve_dry_run_path(target_dir, file_path.name, simulated_existing)
@@ -296,56 +304,48 @@ def organize_folder(
             # Check if file is already in its destination (edge case where target == source)
             if target_path.resolve() == file_path.resolve():
                 summary.skipped_count += 1
-                file_size = file_path.stat().st_size
                 action = OrganizationAction(
                     source=file_path,
                     destination=target_path,
                     category=category,
                     status="skipped",
-                    message=f"Already in {category}: {file_path.name}",
-                    file_size=file_size
+                    message=f"Already in target location: {file_path.name}"
                 )
                 summary.actions.append(action)
-                log(f"Already in correct location: {file_path.name}", "skipped", file_size)
+                log(f"Already in correct location: {file_path.name}", "skipped")
                 continue
 
-            # 3. Perform move or log dry run
+            rel_target = target_path.relative_to(folder_path)
+
+            # 4. Perform move or log dry run
             if dry_run:
                 rename_notice = f" (renamed to '{target_path.name}' to avoid duplicate)" if is_renamed else ""
-                log(f"[Dry Run] Would move '{file_path.name}' -> '{category}/{target_path.name}'{rename_notice}", "dry_run", file_size)
+                log(f"[Dry Run] Would move '{file_path.name}' -> '{rel_target}'{rename_notice}", "dry_run")
                 summary.moved_count += 1
                 action = OrganizationAction(
                     source=file_path,
                     destination=target_path,
                     category=category,
                     status="dry_run",
-                    message=f"Would move to {category}/{target_path.name}{rename_notice}",
-                    is_duplicate_renamed=is_renamed,
-                    file_size=file_size
+                    message=f"Would move to {rel_target}{rename_notice}",
+                    is_duplicate_renamed=is_renamed
                 )
                 summary.actions.append(action)
             else:
-                # Safe move using shutil with retry logic
-                try:
-                    safe_move_with_retry(file_path, target_path)
-                    rename_notice = f" (renamed to '{target_path.name}' to prevent overwrite)" if is_renamed else ""
-                    log(f"Moved '{file_path.name}' -> '{category}/{target_path.name}'{rename_notice}", "success", file_size)
-                    summary.moved_count += 1
-                    action = OrganizationAction(
-                        source=file_path,
-                        destination=target_path,
-                        category=category,
-                        status="moved",
-                        message=f"Moved to {category}/{target_path.name}{rename_notice}",
-                        is_duplicate_renamed=is_renamed,
-                        file_size=file_size
-                    )
-                    summary.actions.append(action)
-                except PermissionError as pe:
-                    err_msg = f"File locked (retried 3 times): '{file_path.name}': {pe}"
-                    summary.error_count += 1
-                    summary.errors.append((file_path.name, err_msg))
-                    log(f"ERROR: {err_msg}", "error")
+                # Safe move using shutil
+                shutil.move(str(file_path), str(target_path))
+                rename_notice = f" (renamed to '{target_path.name}' to prevent overwrite)" if is_renamed else ""
+                log(f"Moved '{file_path.name}' -> '{rel_target}'{rename_notice}", "success")
+                summary.moved_count += 1
+                action = OrganizationAction(
+                    source=file_path,
+                    destination=target_path,
+                    category=category,
+                    status="moved",
+                    message=f"Moved to {rel_target}{rename_notice}",
+                    is_duplicate_renamed=is_renamed
+                )
+                summary.actions.append(action)
 
         except PermissionError as pe:
             err_msg = f"Permission denied for '{file_path.name}': {pe}"
@@ -387,6 +387,7 @@ def save_undo_journal(summary: OrganizationSummary) -> Optional[Path]:
     Saves an undo journal recording the original source and destination
     for all relocated files, providing human peace of mind and 1-click rollback.
     """
+    import json
     try:
         journal_path = get_undo_journal_path(summary.folder_path)
         records = [
@@ -395,17 +396,12 @@ def save_undo_journal(summary: OrganizationSummary) -> Optional[Path]:
                 "destination": str(a.destination.resolve()),
                 "category": a.category,
                 "is_duplicate_renamed": a.is_duplicate_renamed,
-                "file_size": a.file_size,
             }
             for a in summary.actions
             if a.status == "moved"
         ]
         with open(journal_path, "w", encoding="utf-8") as f:
-            json.dump(
-                {"timestamp": datetime.now().isoformat(timespec="seconds"), "moves": records},
-                f,
-                indent=2,
-            )
+            json.dump({"timestamp": Path(__file__).stat().st_mtime, "moves": records}, f, indent=2)
         return journal_path
     except Exception:
         return None
@@ -413,7 +409,7 @@ def save_undo_journal(summary: OrganizationSummary) -> Optional[Path]:
 
 def undo_organization(
     folder_path: Path,
-    progress_callback: Optional[Callable[[str, str, int], None]] = None
+    log_callback: Optional[Callable[[str, str], None]] = None
 ) -> Tuple[int, int]:
     """
     Reverses the last organization run, moving all categorized files
@@ -422,9 +418,11 @@ def undo_organization(
     Returns:
         Tuple of (reverted_count, error_count)
     """
-    def log(msg: str, level: str = "info", file_size: int = 0) -> None:
-        if progress_callback:
-            progress_callback(msg, level, file_size)
+    import json
+
+    def log(msg: str, level: str = "info"):
+        if log_callback:
+            log_callback(msg, level)
 
     journal_path = get_undo_journal_path(folder_path)
     if not journal_path.exists():
@@ -442,46 +440,40 @@ def undo_organization(
     moves = data.get("moves", [])
     reverted = 0
     errors = 0
-    categories_touched = set()
+    directories_touched = set()
 
     for item in reversed(moves):
         src_orig = Path(item["source"])
         dest_curr = Path(item["destination"])
-        category = item.get("category", "")
-        if category:
-            categories_touched.add(folder_path / category)
+
+        # Track parent directories up to folder_path for clean-up
+        curr = dest_curr.parent
+        while curr != folder_path and folder_path in curr.parents:
+            directories_touched.add(curr)
+            curr = curr.parent
 
         if not dest_curr.exists():
-            log(f"Cannot revert '{dest_curr.name}': file not found in category folder.", "warning")
+            log(f"Cannot revert '{dest_curr.name}': file not found in destination folder.", "warning")
             errors += 1
             continue
 
         try:
-            # Move back to the original path without ever overwriting a file
-            # that may have been recreated there since the organization ran.
-            restore_target, was_renamed = get_unique_destination_path(src_orig.parent, src_orig.name)
-            shutil.move(str(dest_curr), str(restore_target))
-            if was_renamed:
-                log(
-                    f"Restored '{dest_curr.name}' as '{restore_target.name}' "
-                    f"(original name already in use; renamed to avoid overwrite).",
-                    "warning",
-                )
-            else:
-                log(f"Restored '{src_orig.name}' back to root folder.", "success")
+            # Move back to original source path
+            shutil.move(str(dest_curr), str(src_orig))
+            log(f"Restored '{src_orig.name}' back to root folder.", "success")
             reverted += 1
         except Exception as e:
             log(f"Error restoring '{dest_curr.name}': {e}", "error")
             errors += 1
 
-    # Clean up empty category folders if left unoccupied
-    for cat_dir in categories_touched:
-        if cat_dir.exists() and cat_dir.is_dir():
-            remaining = [p for p in cat_dir.iterdir() if not is_hidden_or_system_file(p)]
+    # Clean up empty subfolders and category folders (deepest first)
+    for directory in sorted(directories_touched, key=lambda p: len(str(p)), reverse=True):
+        if directory.exists() and directory.is_dir():
+            remaining = [p for p in directory.iterdir() if not is_hidden_or_system_file(p)]
             if not remaining:
                 try:
-                    cat_dir.rmdir()
-                    log(f"Removed empty category folder: {cat_dir.name}/", "info")
+                    directory.rmdir()
+                    log(f"Removed empty folder: {directory.relative_to(folder_path)}/", "info")
                 except Exception:
                     pass
 

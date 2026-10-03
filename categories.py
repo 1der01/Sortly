@@ -5,12 +5,13 @@ This module defines the mapping between file extensions and their target categor
 Unsupported or unrecognized extensions are automatically assigned to the "Others" category.
 """
 
-from __future__ import annotations
-
-from typing import Dict, List, Optional, Set
+import json
+import os
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 # Supported categories with their associated lowercase file extensions (without leading dot).
-CATEGORY_MAPPINGS: Dict[str, List[str]] = {
+DEFAULT_CATEGORY_MAPPINGS: Dict[str, List[str]] = {
     "Documents": [
         "pdf", "doc", "docx", "txt", "xlsx", "xls", "ppt", "pptx",
         "csv", "rtf", "odt", "ods", "odp", "tex", "epub", "md"
@@ -40,75 +41,126 @@ CATEGORY_MAPPINGS: Dict[str, List[str]] = {
 
 DEFAULT_CATEGORY = "Others"
 
-# Precompute a reverse lookup map for O(1) extension-to-category resolution
-_EXTENSION_LOOKUP: Dict[str, str] = {}
-for category, extensions in CATEGORY_MAPPINGS.items():
-    for ext in extensions:
-        _EXTENSION_LOOKUP[ext.lower()] = category
+# Maintain backwards compatibility
+CATEGORY_MAPPINGS = DEFAULT_CATEGORY_MAPPINGS
 
 
-def get_category_for_extension(extension: Optional[str], custom_categories: Optional[Dict[str, List[str]]] = None) -> str:
+class SortlyConfig:
+    """Manages custom category mappings and file filtering preferences."""
+
+    def __init__(self, mappings: Optional[Dict[str, List[str]]] = None, ignored_extensions: Optional[List[str]] = None, date_format: str = "%Y-%m"):
+        self.mappings: Dict[str, List[str]] = {}
+        for cat, exts in DEFAULT_CATEGORY_MAPPINGS.items():
+            self.mappings[cat] = list(exts)
+
+        if mappings:
+            for cat, exts in mappings.items():
+                if cat in self.mappings:
+                    # Merge extensions without duplicates
+                    existing = set(self.mappings[cat])
+                    for e in exts:
+                        clean_e = e.strip().lstrip(".").lower()
+                        if clean_e and clean_e not in existing:
+                            self.mappings[cat].append(clean_e)
+                            existing.add(clean_e)
+                else:
+                    self.mappings[cat] = [e.strip().lstrip(".").lower() for e in exts if e.strip()]
+
+        self.ignored_extensions: set[str] = set()
+        if ignored_extensions:
+            for ext in ignored_extensions:
+                clean = ext.strip().lstrip(".").lower()
+                if clean:
+                    self.ignored_extensions.add(clean)
+
+        self.date_format = date_format
+        self._lookup: Dict[str, str] = {}
+        self._rebuild_lookup()
+
+    def _rebuild_lookup(self):
+        self._lookup.clear()
+        for category, extensions in self.mappings.items():
+            for ext in extensions:
+                self._lookup[ext.lower()] = category
+
+    def get_category(self, extension: Optional[str]) -> str:
+        if not extension:
+            return DEFAULT_CATEGORY
+        cleaned = extension.strip().lstrip(".").lower()
+        if not cleaned:
+            return DEFAULT_CATEGORY
+        return self._lookup.get(cleaned, DEFAULT_CATEGORY)
+
+    def is_ignored_extension(self, extension: Optional[str]) -> bool:
+        if not extension:
+            return False
+        cleaned = extension.strip().lstrip(".").lower()
+        return cleaned in self.ignored_extensions
+
+    def get_all_categories(self) -> List[str]:
+        cats = list(self.mappings.keys())
+        if DEFAULT_CATEGORY not in cats:
+            cats.append(DEFAULT_CATEGORY)
+        return cats
+
+
+# Global default configuration instance
+_GLOBAL_CONFIG = SortlyConfig()
+
+
+def load_sortly_config(custom_path: Optional[Path] = None, search_folder: Optional[Path] = None) -> Tuple[SortlyConfig, Optional[Path]]:
+    """
+    Attempts to load a sortly_config.json configuration file.
+    Search order:
+    1. custom_path (if specified by caller/CLI)
+    2. search_folder / sortly_config.json
+    3. current working directory / sortly_config.json
+    4. user home directory / .sortly_config.json
+    """
+    candidates = []
+    if custom_path:
+        candidates.append(Path(custom_path))
+    if search_folder:
+        candidates.append(search_folder / "sortly_config.json")
+    candidates.append(Path.cwd() / "sortly_config.json")
+    candidates.append(Path.home() / ".sortly_config.json")
+
+    for path in candidates:
+        if path and path.exists() and path.is_file():
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                custom_mappings = data.get("categories", {})
+                ignored = data.get("ignored_extensions", [])
+                date_fmt = data.get("date_format", "%Y-%m")
+                cfg = SortlyConfig(mappings=custom_mappings, ignored_extensions=ignored, date_format=date_fmt)
+                return cfg, path
+            except Exception:
+                continue
+
+    return SortlyConfig(), None
+
+
+def get_category_for_extension(extension: Optional[str], config: Optional[SortlyConfig] = None) -> str:
     """
     Returns the category name for a given file extension.
-
-    Args:
-        extension: The file extension (with or without leading dot, case-insensitive).
-                   Can be None or empty string.
-        custom_categories: Optional dictionary of custom category mappings to override/extend defaults.
-
-    Returns:
-        The matched category name, or "Others" if not recognized or extension is absent.
-
-    Examples:
-        >>> get_category_for_extension(".pdf")
-        'Documents'
-        >>> get_category_for_extension("PNG")
-        'Images'
-        >>> get_category_for_extension(".unknown")
-        'Others'
-        >>> get_category_for_extension("")
-        'Others'
     """
-    if not extension:
-        return DEFAULT_CATEGORY
-
-    # Clean the extension: remove whitespace, leading dot, and convert to lowercase
-    cleaned_ext = extension.strip().lstrip(".").lower()
-
-    if not cleaned_ext:
-        return DEFAULT_CATEGORY
-
-    # Check custom categories first if provided
-    if custom_categories:
-        for category, extensions in custom_categories.items():
-            if cleaned_ext in [ext.lower() for ext in extensions]:
-                return category
-
-    return _EXTENSION_LOOKUP.get(cleaned_ext, DEFAULT_CATEGORY)
+    cfg = config or _GLOBAL_CONFIG
+    return cfg.get_category(extension)
 
 
-def get_all_categories(custom_categories: Optional[Dict[str, List[str]]] = None) -> List[str]:
+def get_all_categories(config: Optional[SortlyConfig] = None) -> List[str]:
     """
-    Returns a sorted list of all configured category names including 'Others'.
-    
-    Args:
-        custom_categories: Optional dictionary of custom categories to include.
+    Returns a list of all configured category names including 'Others'.
     """
-    categories = list(CATEGORY_MAPPINGS.keys())
-    
-    # Add custom categories if provided
-    if custom_categories:
-        categories.extend(custom_categories.keys())
-    
-    if DEFAULT_CATEGORY not in categories:
-        categories.append(DEFAULT_CATEGORY)
-    
-    # Remove duplicates and sort
-    return sorted(list(set(categories)))
+    cfg = config or _GLOBAL_CONFIG
+    return cfg.get_all_categories()
 
 
-def get_extensions_for_category(category: str) -> List[str]:
+def get_extensions_for_category(category: str, config: Optional[SortlyConfig] = None) -> List[str]:
     """
     Returns the list of extensions associated with a category.
     """
-    return CATEGORY_MAPPINGS.get(category, [])
+    cfg = config or _GLOBAL_CONFIG
+    return cfg.mappings.get(category, [])
+
