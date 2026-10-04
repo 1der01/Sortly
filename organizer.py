@@ -401,7 +401,7 @@ def save_undo_journal(summary: OrganizationSummary) -> Optional[Path]:
             if a.status == "moved"
         ]
         with open(journal_path, "w", encoding="utf-8") as f:
-            json.dump({"timestamp": Path(__file__).stat().st_mtime, "moves": records}, f, indent=2)
+            json.dump({"timestamp": datetime.now().isoformat(), "moves": records}, f, indent=2)
         return journal_path
     except Exception:
         return None
@@ -409,7 +409,8 @@ def save_undo_journal(summary: OrganizationSummary) -> Optional[Path]:
 
 def undo_organization(
     folder_path: Path,
-    log_callback: Optional[Callable[[str, str], None]] = None
+    log_callback: Optional[Callable[[str, str], None]] = None,
+    progress_callback: Optional[Callable[..., None]] = None,
 ) -> Tuple[int, int]:
     """
     Reverses the last organization run, moving all categorized files
@@ -420,9 +421,17 @@ def undo_organization(
     """
     import json
 
+    callback = progress_callback or log_callback
+
     def log(msg: str, level: str = "info"):
-        if log_callback:
-            log_callback(msg, level)
+        if callback:
+            try:
+                callback(msg, level)
+            except TypeError:
+                try:
+                    callback(msg, level, 0)
+                except Exception:
+                    pass
 
     journal_path = get_undo_journal_path(folder_path)
     if not journal_path.exists():
@@ -458,9 +467,11 @@ def undo_organization(
             continue
 
         try:
-            # Move back to original source path
-            shutil.move(str(dest_curr), str(src_orig))
-            log(f"Restored '{src_orig.name}' back to root folder.", "success")
+            # Move back to original source path (safe from overwriting recreated files)
+            target_restore_path, is_renamed = get_unique_destination_path(src_orig.parent, src_orig.name)
+            shutil.move(str(dest_curr), str(target_restore_path))
+            rename_note = f" (renamed to '{target_restore_path.name}' to avoid overwriting existing file)" if is_renamed else ""
+            log(f"Restored '{src_orig.name}' back to root folder{rename_note}.", "success")
             reverted += 1
         except Exception as e:
             log(f"Error restoring '{dest_curr.name}': {e}", "error")

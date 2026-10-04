@@ -17,10 +17,11 @@ import sys
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from organizer import (
     OrganizationSummary,
+    get_undo_journal_path,
     open_folder_in_explorer,
     organize_folder,
     undo_organization,
@@ -40,6 +41,422 @@ try:
         HAS_TKINTER = True
 except Exception:
     HAS_TKINTER = False
+
+
+IS_MAC = sys.platform == "darwin"
+MOD_KEY = "⌘" if IS_MAC else "Ctrl"
+
+SHORTCUT_SPECS = {
+    "browse": {
+        "key": f"{MOD_KEY}+O",
+        "title": "Browse Target Folder",
+        "description": "Selects a folder to organize using the file dialog.",
+    },
+    "organize": {
+        "key": f"{MOD_KEY}+↵",
+        "title": "Organize Files",
+        "description": "Scans and organizes files into categorized subdirectories.",
+    },
+    "dry_run": {
+        "key": f"{MOD_KEY}+D",
+        "title": "Toggle Dry Run Mode",
+        "description": "Toggles between safe preview mode and real file moves.",
+    },
+    "group_date": {
+        "key": f"{MOD_KEY}+G",
+        "title": "Toggle Date Sub-grouping",
+        "description": "Toggles nesting files into Year-Month subfolders under each category.",
+    },
+    "undo": {
+        "key": f"{MOD_KEY}+Z",
+        "title": "Undo Last Clean",
+        "description": "Reverses the previous organization run using the local undo journal.",
+    },
+    "open_folder": {
+        "key": f"{MOD_KEY}+E",
+        "title": "Open in File Explorer",
+        "description": "Opens the target directory in the operating system file manager.",
+    },
+    "clear": {
+        "key": f"{MOD_KEY}+L",
+        "title": "Clear Status & Metrics",
+        "description": "Clears the activity log and resets all counter metrics to 0.",
+    },
+    "help": {
+        "key": "F1",
+        "title": "Shortcuts Guide",
+        "description": "Opens the keyboard shortcuts and quick navigation reference.",
+    },
+}
+
+
+def get_shortcut_context_explanation(
+    action: str,
+    folder_path: str = "",
+    is_dry_run: bool = True,
+    is_running: bool = False,
+    group_by_date: bool = False,
+    has_undo: bool = False,
+) -> Dict[str, str]:
+    """
+    Returns real-time contextual information and an exact explanation
+    of what a shortcut key does given the current application state.
+    """
+    spec = SHORTCUT_SPECS.get(
+        action,
+        {"key": "Key", "title": action.title(), "description": "Keyboard shortcut action."},
+    )
+
+    clean_folder = folder_path.strip()
+    folder_name = Path(clean_folder).name if clean_folder else ""
+
+    # 1. When an organization operation is actively running
+    if is_running and action != "help":
+        return {
+            "action": action,
+            "key": spec["key"],
+            "title": spec["title"],
+            "description": spec["description"],
+            "context_status": "Locked (Operation Running)",
+            "context_level": "warning",
+            "context_explanation": "Sortly is currently organizing files. All execution actions are locked until the background worker finishes.",
+        }
+
+    # 2. Browse Folder
+    if action == "browse":
+        if clean_folder:
+            return {
+                "action": action,
+                "key": spec["key"],
+                "title": spec["title"],
+                "description": spec["description"],
+                "context_status": f"Active: {folder_name}",
+                "context_level": "info",
+                "context_explanation": f"Current target is '{folder_name}'. Pressing {spec['key']} will open the folder dialog to switch to another directory.",
+            }
+        return {
+            "action": action,
+            "key": spec["key"],
+            "title": spec["title"],
+            "description": spec["description"],
+            "context_status": "Ready to Choose",
+            "context_level": "info",
+            "context_explanation": f"No folder selected yet. Pressing {spec['key']} opens the file browser so you can pick a target folder.",
+        }
+
+    # 3. Organize Files
+    if action == "organize":
+        if not clean_folder:
+            return {
+                "action": action,
+                "key": spec["key"],
+                "title": spec["title"],
+                "description": spec["description"],
+                "context_status": "Disabled (No Folder)",
+                "context_level": "error",
+                "context_explanation": f"No directory selected. Press {SHORTCUT_SPECS['browse']['key']} first to select a folder before organizing.",
+            }
+        date_note = " into Year-Month subfolders" if group_by_date else ""
+        if is_dry_run:
+            return {
+                "action": action,
+                "key": spec["key"],
+                "title": spec["title"],
+                "description": spec["description"],
+                "context_status": "Preview Mode (Safe)",
+                "context_level": "info",
+                "context_explanation": f"Dry Run is ON. Pressing {spec['key']} will simulate categorizing '{folder_name}'{date_note} without touching or moving any files on disk.",
+            }
+        return {
+            "action": action,
+            "key": spec["key"],
+            "title": spec["title"],
+            "description": spec["description"],
+            "context_status": "Live Move Mode",
+            "context_level": "success",
+            "context_explanation": f"Live Move is ON. Pressing {spec['key']} will relocate eligible files in '{folder_name}' into category folders{date_note}. An undo journal will be generated for 1-click rollback.",
+        }
+
+    # 4. Toggle Dry Run
+    if action == "dry_run":
+        if is_dry_run:
+            return {
+                "action": action,
+                "key": spec["key"],
+                "title": spec["title"],
+                "description": spec["description"],
+                "context_status": "Preview Mode (Active)",
+                "context_level": "info",
+                "context_explanation": f"Dry Run is currently ON (files will NOT be moved). Pressing {spec['key']} will switch to Live Move mode.",
+            }
+        return {
+            "action": action,
+            "key": spec["key"],
+            "title": spec["title"],
+            "description": spec["description"],
+            "context_status": "Live Mode (Active)",
+            "context_level": "warning",
+            "context_explanation": f"Dry Run is currently OFF (files WILL be moved). Pressing {spec['key']} will switch to Safe Preview mode.",
+        }
+
+    # 5. Toggle Date Sub-grouping
+    if action == "group_date":
+        if group_by_date:
+            return {
+                "action": action,
+                "key": spec["key"],
+                "title": spec["title"],
+                "description": spec["description"],
+                "context_status": "Date Sub-grouping ON",
+                "context_level": "info",
+                "context_explanation": f"Date grouping is currently ON (e.g. Documents/2026-10/). Pressing {spec['key']} will switch back to flat category folders.",
+            }
+        return {
+            "action": action,
+            "key": spec["key"],
+            "title": spec["title"],
+            "description": spec["description"],
+            "context_status": "Date Sub-grouping OFF",
+            "context_level": "info",
+            "context_explanation": f"Date grouping is currently OFF. Pressing {spec['key']} will enable automatic Year-Month subfolders under each category.",
+        }
+
+    # 6. Undo Last Organization
+    if action == "undo":
+        if not clean_folder:
+            return {
+                "action": action,
+                "key": spec["key"],
+                "title": spec["title"],
+                "description": spec["description"],
+                "context_status": "Disabled (No Folder)",
+                "context_level": "error",
+                "context_explanation": "Select a target folder first to inspect its undo history.",
+            }
+        if has_undo:
+            return {
+                "action": action,
+                "key": spec["key"],
+                "title": spec["title"],
+                "description": spec["description"],
+                "context_status": "Undo Available",
+                "context_level": "success",
+                "context_explanation": f"Undo journal found in '{folder_name}'. Pressing {spec['key']} will safely restore all relocated files back to root and clean empty category folders.",
+            }
+        return {
+            "action": action,
+            "key": spec["key"],
+            "title": spec["title"],
+            "description": spec["description"],
+            "context_status": "No Undo Journal",
+            "context_level": "warning",
+            "context_explanation": f"No previous organization journal found in '{folder_name}'. Run an organization first to enable rollback.",
+        }
+
+    # 7. Open Folder in Explorer
+    if action == "open_folder":
+        if not clean_folder:
+            return {
+                "action": action,
+                "key": spec["key"],
+                "title": spec["title"],
+                "description": spec["description"],
+                "context_status": "Disabled (No Folder)",
+                "context_level": "error",
+                "context_explanation": "Select a target folder first to open it in your system file manager.",
+            }
+        return {
+            "action": action,
+            "key": spec["key"],
+            "title": spec["title"],
+            "description": spec["description"],
+            "context_status": f"Ready: {folder_name}",
+            "context_level": "info",
+            "context_explanation": f"Pressing {spec['key']} will open '{folder_name}' directly in your native file manager (Explorer / Finder).",
+        }
+
+    # 8. Clear Status
+    if action == "clear":
+        return {
+            "action": action,
+            "key": spec["key"],
+            "title": spec["title"],
+            "description": spec["description"],
+            "context_status": "Ready to Clear",
+            "context_level": "info",
+            "context_explanation": f"Pressing {spec['key']} will clear the activity log window and reset Scanned, Moved, Skipped, and Error counters to 0.",
+        }
+
+    # 9. Shortcuts Guide / Help
+    return {
+        "action": action,
+        "key": spec["key"],
+        "title": spec["title"],
+        "description": spec["description"],
+        "context_status": "Always Available",
+        "context_level": "info",
+        "context_explanation": f"Pressing {spec['key']} displays the complete Keyboard Shortcuts & Navigation reference dialog.",
+    }
+
+
+class ContextTooltip:
+    """
+    Modern floating popover attached to Tkinter widgets that displays
+    real-time contextual shortcut explanations on hover.
+    """
+    def __init__(self, widget: Any, provider: Callable[[], Dict[str, str]], delay_ms: int = 150):
+        self.widget = widget
+        self.provider = provider
+        self.delay_ms = delay_ms
+        self.tip_window: Optional[Any] = None
+        self._after_id: Optional[str] = None
+
+        if hasattr(self.widget, "bind"):
+            self.widget.bind("<Enter>", self._schedule_show, add="+")
+            self.widget.bind("<Leave>", self._hide, add="+")
+            self.widget.bind("<ButtonPress>", self._hide, add="+")
+
+    def _schedule_show(self, event=None):
+        self._cancel()
+        if HAS_TKINTER and hasattr(self.widget, "after"):
+            self._after_id = self.widget.after(self.delay_ms, self._show)
+
+    def _cancel(self):
+        if self._after_id and hasattr(self.widget, "after_cancel"):
+            try:
+                self.widget.after_cancel(self._after_id)
+            except Exception:
+                pass
+            self._after_id = None
+
+    def _hide(self, event=None):
+        self._cancel()
+        if self.tip_window:
+            try:
+                self.tip_window.destroy()
+            except Exception:
+                pass
+            self.tip_window = None
+
+    def _show(self):
+        if not HAS_TKINTER or not hasattr(self.widget, "winfo_exists") or not self.widget.winfo_exists():
+            return
+
+        data = self.provider()
+        if not data:
+            return
+
+        self._hide()
+
+        try:
+            tip = tk.Toplevel(self.widget)
+            self.tip_window = tip
+            tip.wm_overrideredirect(True)
+            try:
+                tip.attributes("-topmost", True)
+            except Exception:
+                pass
+
+            # Outer card container
+            card = tk.Frame(tip, bg="#0f172a", highlightthickness=1, highlightbackground="#334155", padx=10, pady=8)
+            card.pack(fill="both", expand=True)
+
+            # Header row: Key Badge + Title
+            header_row = tk.Frame(card, bg="#0f172a")
+            header_row.pack(fill="x", pady=(0, 4))
+
+            key_badge = tk.Label(
+                header_row,
+                text=f" {data.get('key', '')} ",
+                font=("Consolas", 9, "bold"),
+                bg="#0284c7",
+                fg="#ffffff",
+                padx=4,
+                pady=1
+            )
+            key_badge.pack(side="left", padx=(0, 6))
+
+            title_lbl = tk.Label(
+                header_row,
+                text=data.get("title", ""),
+                font=("Segoe UI", 9, "bold"),
+                bg="#0f172a",
+                fg="#f8fafc"
+            )
+            title_lbl.pack(side="left")
+
+            # General description
+            desc_lbl = tk.Label(
+                card,
+                text=data.get("description", ""),
+                font=("Segoe UI", 8),
+                bg="#0f172a",
+                fg="#94a3b8",
+                wraplength=310,
+                justify="left"
+            )
+            desc_lbl.pack(anchor="w", pady=(0, 6))
+
+            # Context Card
+            level_colors = {
+                "success": "#34d399",  # emerald-400
+                "warning": "#fbbf24",  # amber-400
+                "error": "#f87171",    # red-400
+                "info": "#38bdf8",     # sky-400
+            }
+            level = data.get("context_level", "info")
+            fg_status = level_colors.get(level, level_colors["info"])
+
+            ctx_box = tk.Frame(card, bg="#1e293b", highlightthickness=1, highlightbackground="#334155", padx=8, pady=6)
+            ctx_box.pack(fill="x")
+
+            status_lbl = tk.Label(
+                ctx_box,
+                text=f"● Current Context: {data.get('context_status', '')}",
+                font=("Segoe UI", 8, "bold"),
+                bg="#1e293b",
+                fg=fg_status
+            )
+            status_lbl.pack(anchor="w")
+
+            expl_lbl = tk.Label(
+                ctx_box,
+                text=data.get("context_explanation", ""),
+                font=("Segoe UI", 8),
+                bg="#1e293b",
+                fg="#e2e8f0",
+                wraplength=290,
+                justify="left"
+            )
+            expl_lbl.pack(anchor="w", pady=(2, 0))
+
+            tip.update_idletasks()
+            tip_w = tip.winfo_reqwidth()
+            tip_h = tip.winfo_reqheight()
+
+            wx = self.widget.winfo_rootx()
+            wy = self.widget.winfo_rooty()
+            wh = self.widget.winfo_height()
+            ww = self.widget.winfo_width()
+
+            # Center horizontally on the hovered widget
+            x = wx + (ww // 2) - (tip_w // 2)
+            y = wy + wh + 6
+
+            screen_w = tip.winfo_screenwidth()
+            screen_h = tip.winfo_screenheight()
+
+            if x < 12:
+                x = 12
+            elif x + tip_w > screen_w - 12:
+                x = screen_w - tip_w - 12
+
+            if y + tip_h > screen_h - 12:
+                y = wy - tip_h - 6
+
+            tip.wm_geometry(f"+{x}+{y}")
+        except Exception:
+            self._hide()
 
 
 class FileOrganizerGUI:
@@ -183,6 +600,74 @@ class FileOrganizerGUI:
         self.organize_btn.pack(side=tk.LEFT)
 
         # -----------------------------------------------------------------
+        # 3b. Interactive Keyboard Shortcuts Bar (Hover for visual context popover)
+        # -----------------------------------------------------------------
+        shortcut_bar = ttk.LabelFrame(main_container, text=" Keyboard Shortcuts (Hover for Live Context) ", padding="8 6 8 6")
+        shortcut_bar.pack(fill=tk.X, pady=(0, 10))
+
+        bar_sub = ttk.Label(
+            shortcut_bar,
+            text="⌨ Shortcuts:",
+            font=("Segoe UI", 8, "bold"),
+            foreground="#64748b"
+        )
+        bar_sub.pack(side=tk.LEFT, padx=(2, 6))
+
+        badges_container = ttk.Frame(shortcut_bar)
+        badges_container.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        shortcut_actions = [
+            ("browse", SHORTCUT_SPECS["browse"]["key"], "Browse", self._on_browse_folder),
+            ("organize", SHORTCUT_SPECS["organize"]["key"], "Organize", self._on_start_organize),
+            ("dry_run", SHORTCUT_SPECS["dry_run"]["key"], "Dry Run", self._toggle_dry_run),
+            ("group_date", SHORTCUT_SPECS["group_date"]["key"], "Date", self._toggle_group_date),
+            ("undo", SHORTCUT_SPECS["undo"]["key"], "Undo", self._on_undo_organize),
+            ("open_folder", SHORTCUT_SPECS["open_folder"]["key"], "Open", self._on_open_folder),
+            ("clear", SHORTCUT_SPECS["clear"]["key"], "Clear", self._on_clear_status),
+            ("help", SHORTCUT_SPECS["help"]["key"], "Guide", self._show_shortcuts_dialog),
+        ]
+
+        self.shortcut_badges = {}
+        for action_id, key_label, name_label, command_func in shortcut_actions:
+            badge = tk.Label(
+                badges_container,
+                text=f"{key_label} {name_label}",
+                font=("Consolas", 8),
+                bg="#f1f5f9",
+                fg="#334155",
+                relief="solid",
+                borderwidth=1,
+                padx=6,
+                pady=2,
+                cursor="hand2"
+            )
+            badge.pack(side=tk.LEFT, padx=3)
+
+            # Bind click to execute
+            badge.bind("<Button-1>", lambda e, cmd=command_func: cmd())
+
+            # Hover highlight styling
+            def _bind_hover(b):
+                b.bind("<Enter>", lambda e: b.config(bg="#e2e8f0", fg="#0f172a"), add="+")
+                b.bind("<Leave>", lambda e: b.config(bg="#f1f5f9", fg="#334155"), add="+")
+            _bind_hover(badge)
+
+            # Attach visual contextual tooltip to shortcut badge
+            ContextTooltip(badge, lambda aid=action_id: self._get_context(aid))
+            self.shortcut_badges[action_id] = badge
+
+        # Attach visual contextual tooltips to main control buttons as well
+        ContextTooltip(self.browse_btn, lambda: self._get_context("browse"))
+        ContextTooltip(self.organize_btn, lambda: self._get_context("organize"))
+        ContextTooltip(self.dry_run_check, lambda: self._get_context("dry_run"))
+        ContextTooltip(self.date_check, lambda: self._get_context("group_date"))
+        ContextTooltip(self.undo_btn, lambda: self._get_context("undo"))
+        ContextTooltip(self.open_btn, lambda: self._get_context("open_folder"))
+        ContextTooltip(self.clear_btn, lambda: self._get_context("clear"))
+
+        self._bind_keyboard_shortcuts()
+
+        # -----------------------------------------------------------------
         # 4. Summary Metrics Cards
         # -----------------------------------------------------------------
         summary_frame = ttk.LabelFrame(main_container, text=" Summary Metrics ", padding="10 8 10 8")
@@ -256,6 +741,137 @@ class FileOrganizerGUI:
         self.log_message("Desktop File Organizer initialized.", "info")
         self.log_message("Categories configured: Documents, Images, Videos, Audio, Archives, Code, Others.", "info")
         self.log_message("Tip: Keep 'Dry Run' checked first to preview changes safely.", "dry_run")
+        self.log_message(f"Tip: Hover over any shortcut key ({MOD_KEY}+O, {MOD_KEY}+↵, etc.) to view real-time context popovers.", "info")
+
+    def _has_undo_journal(self) -> bool:
+        folder_str = self.folder_path_var.get().strip()
+        if not folder_str:
+            return False
+        try:
+            return get_undo_journal_path(Path(folder_str)).exists()
+        except Exception:
+            return False
+
+    def _get_context(self, action: str) -> Dict[str, str]:
+        return get_shortcut_context_explanation(
+            action=action,
+            folder_path=self.folder_path_var.get(),
+            is_dry_run=self.dry_run_var.get(),
+            is_running=self.is_running,
+            group_by_date=self.group_by_date_var.get(),
+            has_undo=self._has_undo_journal(),
+        )
+
+    def _toggle_dry_run(self):
+        if self.is_running:
+            return
+        new_val = not self.dry_run_var.get()
+        self.dry_run_var.set(new_val)
+        mode = "Preview only (Dry Run)" if new_val else "Live Move (Files will be relocated)"
+        self.log_message(f"Shortcut {MOD_KEY}+D: Mode set to {mode}", "dry_run" if new_val else "warning")
+
+    def _toggle_group_date(self):
+        if self.is_running:
+            return
+        new_val = not self.group_by_date_var.get()
+        self.group_by_date_var.set(new_val)
+        status = "enabled (Year-Month subfolders)" if new_val else "disabled (Flat categories)"
+        self.log_message(f"Shortcut {MOD_KEY}+G: Date sub-grouping {status}", "info")
+
+    def _show_shortcuts_dialog(self):
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Sortly — Keyboard Shortcuts & Context Guide")
+        dlg.geometry("560x480")
+        dlg.minsize(500, 420)
+        dlg.transient(self.root)
+        dlg.grab_set()
+
+        container = ttk.Frame(dlg, padding="16 16 16 16")
+        container.pack(fill=tk.BOTH, expand=True)
+
+        header = ttk.Label(container, text="Keyboard Shortcuts Reference", font=("Segoe UI", 12, "bold"))
+        header.pack(anchor=tk.W, pady=(0, 2))
+
+        sub = ttk.Label(
+            container,
+            text="Hover over any shortcut badge in the main window for live context popovers.",
+            font=("Segoe UI", 9),
+            foreground="#64748b"
+        )
+        sub.pack(anchor=tk.W, pady=(0, 12))
+
+        table_frame = ttk.Frame(container)
+        table_frame.pack(fill=tk.BOTH, expand=True)
+
+        for action_id, spec in SHORTCUT_SPECS.items():
+            ctx = self._get_context(action_id)
+            row = ttk.Frame(table_frame)
+            row.pack(fill=tk.X, pady=4)
+
+            k_lbl = tk.Label(
+                row,
+                text=f" {spec['key']} ",
+                font=("Consolas", 9, "bold"),
+                bg="#0284c7",
+                fg="#ffffff",
+                padx=4,
+                pady=1,
+                width=10,
+                anchor="center"
+            )
+            k_lbl.pack(side=tk.LEFT, padx=(0, 8))
+
+            info_box = ttk.Frame(row)
+            info_box.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+            t_lbl = ttk.Label(info_box, text=spec["title"], font=("Segoe UI", 9, "bold"))
+            t_lbl.pack(anchor=tk.W)
+
+            desc_lbl = ttk.Label(
+                info_box,
+                text=f"{spec['description']} • Context: {ctx['context_status']}",
+                font=("Segoe UI", 8),
+                foreground="#555555"
+            )
+            desc_lbl.pack(anchor=tk.W)
+
+        btn_row = ttk.Frame(container)
+        btn_row.pack(fill=tk.X, pady=(12, 0))
+        ttk.Button(btn_row, text="Close", command=dlg.destroy).pack(side=tk.RIGHT)
+
+    def _bind_keyboard_shortcuts(self):
+        mod = "Command" if IS_MAC else "Control"
+
+        # Browse folder: Ctrl+O
+        self.root.bind(f"<{mod}-o>", lambda e: self._on_browse_folder())
+        self.root.bind(f"<{mod}-O>", lambda e: self._on_browse_folder())
+
+        # Organize: Ctrl+Enter
+        self.root.bind(f"<{mod}-Return>", lambda e: self._on_start_organize())
+
+        # Toggle dry-run: Ctrl+D
+        self.root.bind(f"<{mod}-d>", lambda e: self._toggle_dry_run())
+        self.root.bind(f"<{mod}-D>", lambda e: self._toggle_dry_run())
+
+        # Toggle date group: Ctrl+G
+        self.root.bind(f"<{mod}-g>", lambda e: self._toggle_group_date())
+        self.root.bind(f"<{mod}-G>", lambda e: self._toggle_group_date())
+
+        # Undo: Ctrl+Z
+        self.root.bind(f"<{mod}-z>", lambda e: self._on_undo_organize())
+        self.root.bind(f"<{mod}-Z>", lambda e: self._on_undo_organize())
+
+        # Open in Explorer: Ctrl+E
+        self.root.bind(f"<{mod}-e>", lambda e: self._on_open_folder())
+        self.root.bind(f"<{mod}-E>", lambda e: self._on_open_folder())
+
+        # Clear Status: Ctrl+L
+        self.root.bind(f"<{mod}-l>", lambda e: self._on_clear_status())
+        self.root.bind(f"<{mod}-L>", lambda e: self._on_clear_status())
+
+        # Help guide: F1 or Ctrl+/
+        self.root.bind("<F1>", lambda e: self._show_shortcuts_dialog())
+        self.root.bind(f"<{mod}-slash>", lambda e: self._show_shortcuts_dialog())
 
     def log_message(self, message: str, level: str = "info"):
         """Appends a timestamped line to the activity log in a thread-safe way."""

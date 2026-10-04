@@ -351,5 +351,92 @@ class TestFileOrganizer(unittest.TestCase):
         self.assertTrue(any("Restored" in msg for msg, _ in messages))
 
 
+class TestShortcutContext(unittest.TestCase):
+    """Test suite validating the contextual shortcut explanations and tooltips."""
+
+    def test_browse_shortcut_context(self):
+        from main import get_shortcut_context_explanation
+        # Empty folder
+        ctx_empty = get_shortcut_context_explanation("browse", folder_path="")
+        self.assertEqual(ctx_empty["context_status"], "Ready to Choose")
+        self.assertIn("opens the file browser", ctx_empty["context_explanation"].lower())
+
+        # Folder chosen
+        ctx_folder = get_shortcut_context_explanation("browse", folder_path="/home/user/Downloads")
+        self.assertIn("Downloads", ctx_folder["context_status"])
+        self.assertIn("switch to another directory", ctx_folder["context_explanation"])
+
+    def test_organize_shortcut_context(self):
+        from main import get_shortcut_context_explanation
+        # Without folder -> Disabled
+        ctx_no_folder = get_shortcut_context_explanation("organize", folder_path="")
+        self.assertEqual(ctx_no_folder["context_level"], "error")
+        self.assertIn("Disabled", ctx_no_folder["context_status"])
+
+        # With folder in Dry Run
+        ctx_dry = get_shortcut_context_explanation("organize", folder_path="/home/user/Downloads", is_dry_run=True)
+        self.assertEqual(ctx_dry["context_status"], "Preview Mode (Safe)")
+        self.assertIn("Dry Run is ON", ctx_dry["context_explanation"])
+        self.assertIn("without touching or moving", ctx_dry["context_explanation"])
+
+        # With folder in Live Move
+        ctx_live = get_shortcut_context_explanation("organize", folder_path="/home/user/Downloads", is_dry_run=False)
+        self.assertEqual(ctx_live["context_status"], "Live Move Mode")
+        self.assertIn("Live Move is ON", ctx_live["context_explanation"])
+        self.assertIn("relocate eligible files", ctx_live["context_explanation"])
+
+    def test_dry_run_toggle_context(self):
+        from main import get_shortcut_context_explanation
+        ctx_on = get_shortcut_context_explanation("dry_run", is_dry_run=True)
+        self.assertIn("ON", ctx_on["context_explanation"])
+        self.assertIn("switch to Live Move", ctx_on["context_explanation"])
+
+        ctx_off = get_shortcut_context_explanation("dry_run", is_dry_run=False)
+        self.assertIn("OFF", ctx_off["context_explanation"])
+        self.assertIn("switch to Safe Preview", ctx_off["context_explanation"])
+
+    def test_group_date_toggle_context(self):
+        from main import get_shortcut_context_explanation
+        ctx_on = get_shortcut_context_explanation("group_date", group_by_date=True)
+        self.assertIn("ON", ctx_on["context_status"])
+        self.assertIn("flat category folders", ctx_on["context_explanation"])
+
+        ctx_off = get_shortcut_context_explanation("group_date", group_by_date=False)
+        self.assertIn("OFF", ctx_off["context_status"])
+        self.assertIn("Year-Month", ctx_off["context_explanation"])
+
+    def test_undo_context(self):
+        from main import get_shortcut_context_explanation
+        # No folder
+        ctx_no_dir = get_shortcut_context_explanation("undo", folder_path="")
+        self.assertEqual(ctx_no_dir["context_level"], "error")
+
+        # Has undo journal
+        ctx_has_undo = get_shortcut_context_explanation("undo", folder_path="/test/folder", has_undo=True)
+        self.assertEqual(ctx_has_undo["context_status"], "Undo Available")
+        self.assertIn("Undo journal found", ctx_has_undo["context_explanation"])
+
+        # No undo journal
+        ctx_no_undo = get_shortcut_context_explanation("undo", folder_path="/test/folder", has_undo=False)
+        self.assertEqual(ctx_no_undo["context_status"], "No Undo Journal")
+        self.assertIn("No previous organization journal found", ctx_no_undo["context_explanation"])
+
+    def test_open_folder_context(self):
+        from main import get_shortcut_context_explanation
+        ctx_none = get_shortcut_context_explanation("open_folder", folder_path="")
+        self.assertEqual(ctx_none["context_level"], "error")
+
+        ctx_ready = get_shortcut_context_explanation("open_folder", folder_path="/test/MyFolder")
+        self.assertEqual(ctx_ready["context_level"], "info")
+        self.assertIn("MyFolder", ctx_ready["context_explanation"])
+
+    def test_busy_lock_context(self):
+        from main import get_shortcut_context_explanation
+        ctx_locked = get_shortcut_context_explanation("organize", folder_path="/test", is_running=True)
+        self.assertEqual(ctx_locked["context_status"], "Locked (Operation Running)")
+        self.assertEqual(ctx_locked["context_level"], "warning")
+        self.assertIn("currently organizing files", ctx_locked["context_explanation"])
+
+
 if __name__ == "__main__":
     unittest.main()
