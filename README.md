@@ -34,6 +34,7 @@ Crucially, **reliability and file safety are prioritized**:
 ## 2. Features
 
 - **Folder Selection**: Easily browse and select any directory on your system.
+- **Custom Category Rules**: Add or override category mappings with a local `sortly_config.json` file for project-specific organization.
 - **Categorization Engine**: Automatically classifies files into 7 well-defined categories:
   - **Documents**: `PDF`, `DOC`, `DOCX`, `TXT`, `XLSX`, `XLS`, `PPT`, `PPTX`, `CSV`, `RTF`, `ODT`, `MD`
   - **Images**: `JPG`, `JPEG`, `PNG`, `GIF`, `WEBP`, `SVG`, `BMP`, `ICO`, `TIFF`, `HEIC`

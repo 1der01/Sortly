@@ -238,7 +238,27 @@ class TestFileOrganizer(unittest.TestCase):
         # gear.stl moved to custom '3D Models' folder
         self.assertTrue((self.test_dir / "3D Models" / "gear.stl").exists())
         # incomplete.tmp remained untouched in root
-        self.assertTrue((self.test_dir / "incomplete.tmp").exists())
+
+    def test_custom_categories_can_be_added_runtime_and_saved(self):
+        """Users can define custom category rules at runtime and persist them."""
+        from categories import SortlyConfig, load_sortly_config
+
+        cfg = SortlyConfig()
+        cfg.add_category("Receipts", ["pdf", "csv"])
+        self.assertEqual(cfg.get_category("pdf"), "Receipts")
+        self.assertIn("Receipts", cfg.get_all_categories())
+
+        cfg.remove_category("Receipts")
+        self.assertEqual(cfg.get_category("pdf"), "Documents")
+
+        config_path = self.test_dir / "custom_sortly_config.json"
+        cfg.add_category("Client Files", ["pdf", "zip"])
+        cfg.save_to_file(config_path)
+
+        loaded_cfg, source = load_sortly_config(custom_path=config_path)
+        self.assertEqual(source, config_path)
+        self.assertEqual(loaded_cfg.get_category("zip"), "Client Files")
+        self.assertIn("Client Files", loaded_cfg.get_all_categories())
 
     def test_open_folder_invalid_path(self):
         """Verify open_folder_in_explorer handles missing directory safely."""

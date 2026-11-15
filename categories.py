@@ -53,29 +53,106 @@ class SortlyConfig:
         for cat, exts in DEFAULT_CATEGORY_MAPPINGS.items():
             self.mappings[cat] = list(exts)
 
-        if mappings:
-            for cat, exts in mappings.items():
-                if cat in self.mappings:
-                    # Merge extensions without duplicates
-                    existing = set(self.mappings[cat])
-                    for e in exts:
-                        clean_e = e.strip().lstrip(".").lower()
-                        if clean_e and clean_e not in existing:
-                            self.mappings[cat].append(clean_e)
-                            existing.add(clean_e)
-                else:
-                    self.mappings[cat] = [e.strip().lstrip(".").lower() for e in exts if e.strip()]
-
-        self.ignored_extensions: set[str] = set()
-        if ignored_extensions:
-            for ext in ignored_extensions:
-                clean = ext.strip().lstrip(".").lower()
-                if clean:
-                    self.ignored_extensions.add(clean)
-
         self.date_format = date_format
         self._lookup: Dict[str, str] = {}
+
+        if mappings:
+            self.apply_mappings(mappings)
+
+        self.ignored_extensions: set[str] = set()
+        self.set_ignored_extensions(ignored_extensions or [])
         self._rebuild_lookup()
+
+    @staticmethod
+    def _normalize_extensions(values: Optional[List[str]]) -> List[str]:
+        if not values:
+            return []
+        normalized = []
+        seen = set()
+        for value in values:
+            if value is None:
+                continue
+            clean = str(value).strip().lstrip(".").lower()
+            if clean and clean not in seen:
+                normalized.append(clean)
+                seen.add(clean)
+        return normalized
+
+    def apply_mappings(self, mappings: Dict[str, List[str]]) -> None:
+        """Merge custom mappings into the config, allowing custom categories to override defaults."""
+        if not mappings:
+            return
+        for cat, exts in mappings.items():
+            clean_name = str(cat).strip()
+            if not clean_name:
+                continue
+            merged = self._normalize_extensions(exts)
+            if clean_name in self.mappings:
+                # Merge with existing category, preserving its default entries and appending new ones.
+                existing = self.mappings[clean_name]
+                self.mappings[clean_name] = existing + [e for e in merged if e not in existing]
+            else:
+                self.mappings[clean_name] = merged
+        self._rebuild_lookup()
+
+    def add_category(self, category: str, extensions: Optional[List[str]], overwrite: bool = False) -> List[str]:
+        """Add or update a category and return its normalized extension list."""
+        clean_name = str(category).strip()
+        if not clean_name:
+            raise ValueError("Category name cannot be empty.")
+
+        normalized = self._normalize_extensions(extensions)
+        if clean_name in self.mappings and not overwrite:
+            merged = self.mappings[clean_name] + [e for e in normalized if e not in self.mappings[clean_name]]
+            self.mappings[clean_name] = merged
+        else:
+            self.mappings[clean_name] = normalized
+
+        self._rebuild_lookup()
+        return list(self.mappings[clean_name])
+
+    def remove_category(self, category: str) -> bool:
+        """Remove a custom category if it is not one of the built-in defaults."""
+        clean_name = str(category).strip()
+        if not clean_name or clean_name in DEFAULT_CATEGORY_MAPPINGS:
+            return False
+        if clean_name in self.mappings:
+            del self.mappings[clean_name]
+            self._rebuild_lookup()
+            return True
+        return False
+
+    def set_ignored_extensions(self, ignored_extensions: Optional[List[str]]) -> None:
+        self.ignored_extensions = set()
+        for ext in self._normalize_extensions(ignored_extensions):
+            self.ignored_extensions.add(ext)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "categories": {cat: list(exts) for cat, exts in self.mappings.items() if cat != DEFAULT_CATEGORY},
+            "ignored_extensions": sorted(self.ignored_extensions),
+            "date_format": self.date_format,
+        }
+
+    def save_to_file(self, path: Path) -> Path:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with open(target, "w", encoding="utf-8") as f:
+            json.dump(self.to_dict(), f, indent=2)
+        return target
+
+    @classmethod
+    def from_file(cls, path: Path) -> "SortlyConfig":
+        target = Path(path)
+        if not target.exists():
+            return cls()
+        with open(target, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return cls(
+            mappings=data.get("categories", {}),
+            ignored_extensions=data.get("ignored_extensions", []),
+            date_format=data.get("date_format", "%Y-%m"),
+        )
 
     def _rebuild_lookup(self):
         self._lookup.clear()
