@@ -379,7 +379,8 @@ def organize_folder(
 
 def get_undo_journal_path(folder_path: Path) -> Path:
     """Returns the hidden undo journal file path for a directory."""
-    return folder_path / ".organizer_undo.json"
+    normalized = Path(folder_path).expanduser().resolve(strict=False)
+    return normalized / ".organizer_undo.json"
 
 
 def save_undo_journal(summary: OrganizationSummary) -> Optional[Path]:
@@ -392,8 +393,8 @@ def save_undo_journal(summary: OrganizationSummary) -> Optional[Path]:
         journal_path = get_undo_journal_path(summary.folder_path)
         records = [
             {
-                "source": str(a.source.resolve()),
-                "destination": str(a.destination.resolve()),
+                "source": str(Path(a.source).resolve(strict=False)),
+                "destination": str(Path(a.destination).resolve(strict=False)),
                 "category": a.category,
                 "is_duplicate_renamed": a.is_duplicate_renamed,
             }
@@ -433,7 +434,8 @@ def undo_organization(
                 except Exception:
                     pass
 
-    journal_path = get_undo_journal_path(folder_path)
+    normalized_folder = Path(folder_path).expanduser().resolve(strict=False)
+    journal_path = get_undo_journal_path(normalized_folder)
     if not journal_path.exists():
         log("No previous organization journal found to undo in this directory.", "warning")
         return 0, 0
@@ -452,12 +454,13 @@ def undo_organization(
     directories_touched = set()
 
     for item in reversed(moves):
-        src_orig = Path(item["source"])
-        dest_curr = Path(item["destination"])
+        src_orig = Path(item["source"]).resolve(strict=False)
+        dest_curr = Path(item["destination"]).resolve(strict=False)
 
-        # Track parent directories up to folder_path for clean-up
+        # Track parent directories up to the root folder for clean-up.
+        # Use resolved paths to avoid Windows short-name path mismatches.
         curr = dest_curr.parent
-        while curr != folder_path and folder_path in curr.parents:
+        while curr != normalized_folder and normalized_folder in curr.parents:
             directories_touched.add(curr)
             curr = curr.parent
 
@@ -484,7 +487,7 @@ def undo_organization(
             if not remaining:
                 try:
                     directory.rmdir()
-                    log(f"Removed empty folder: {directory.relative_to(folder_path)}/", "info")
+                    log(f"Removed empty folder: {directory.relative_to(normalized_folder)}/", "info")
                 except Exception:
                     pass
 
