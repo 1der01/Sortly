@@ -35,6 +35,7 @@ Crucially, **reliability and file safety are prioritized**:
 
 - **Folder Selection**: Easily browse and select any directory on your system.
 - **Custom Category Rules**: Add or override category mappings with a local `sortly_config.json` file for project-specific organization.
+- **Date-Based Grouping**: Optionally sort into `Documents/2026-11/` style month folders while keeping the primary category structure intact.
 - **Categorization Engine**: Automatically classifies files into 7 well-defined categories:
   - **Documents**: `PDF`, `DOC`, `DOCX`, `TXT`, `XLSX`, `XLS`, `PPT`, `PPTX`, `CSV`, `RTF`, `ODT`, `MD`
   - **Images**: `JPG`, `JPEG`, `PNG`, `GIF`, `WEBP`, `SVG`, `BMP`, `ICO`, `TIFF`, `HEIC`
@@ -212,6 +213,11 @@ terminal mode (CLI is also used automatically on headless systems without a disp
 python3 main.py --cli /path/to/your/folder --dry-run
 ```
 
+**Group by Date (Optional Year-Month Subfolders):**
+```bash
+python3 main.py --cli /path/to/your/folder --date --dry-run
+```
+
 **Perform Actual Organization:**
 ```bash
 python3 main.py --cli /path/to/your/folder
@@ -320,7 +326,6 @@ Downloads/
 ## 11. Future Improvements
 
 - **Custom Category Editor**: Allow users to add custom categories or modify existing extension associations via a GUI settings dialog.
-- **Date-Based Sorting**: Sub-categorize files by Year/Month (e.g., `Images/2026/03/`).
 - **Undo Operation**: Maintain a transactional journal file allowing one-click rollback of the last move operation.
 - **MIME Type Magic Byte Detection**: Optionally inspect file header signatures (`python-magic`) to classify files with incorrect or missing extensions.
 - **Desktop Shortcut & Drag-and-Drop**: Support dragging folders directly onto the application window.
