@@ -474,6 +474,8 @@ class FileOrganizerGUI:
         self.group_by_date_var = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar(value="Ready. Select a folder to begin.")
         self.is_running = False
+        self.config_manager = get_config()
+        self.recent_menu = tk.Menu(self.root, tearoff=0)
 
         # Summary metric tracking variables
         self.metric_scanned_var = tk.StringVar(value="0")
@@ -534,6 +536,13 @@ class FileOrganizerGUI:
             font=("Consolas", 10)
         )
         self.path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
+
+        self.recent_btn = ttk.Button(
+            folder_row,
+            text="Recent",
+            command=self._show_recent_folders_menu
+        )
+        self.recent_btn.pack(side=tk.RIGHT, padx=(0, 8))
 
         self.browse_btn = ttk.Button(
             folder_row,
@@ -887,15 +896,42 @@ class FileOrganizerGUI:
         else:
             self.root.after(0, _append)
 
+    def _apply_selected_folder(self, chosen: str):
+        if not chosen:
+            return
+        chosen_path = str(Path(chosen).expanduser())
+        if not Path(chosen_path).exists() or not Path(chosen_path).is_dir():
+            self.log_message(f"Selected folder is no longer available: {chosen_path}", "warning")
+            return
+        self.folder_path_var.set(chosen_path)
+        self.status_var.set(f"Selected folder: {chosen_path}")
+        self.config_manager.add_recent_folder(chosen_path)
+        self.log_message(f"Selected target directory: {chosen_path}", "info")
+
+    def _show_recent_folders_menu(self):
+        self.recent_menu.delete(0, tk.END)
+        recent = self.config_manager.get_recent_folders()
+
+        if not recent:
+            self.recent_menu.add_command(label="No recent folders yet", state=tk.DISABLED)
+        else:
+            for folder in recent:
+                self.recent_menu.add_command(
+                    label=folder,
+                    command=lambda path=folder: self._apply_selected_folder(path),
+                )
+            self.recent_menu.add_separator()
+            self.recent_menu.add_command(label="Clear recent folders", command=self.config_manager.clear_recent_folders)
+
+        self.recent_menu.post(self.recent_btn.winfo_rootx(), self.recent_btn.winfo_rooty() + self.recent_btn.winfo_height())
+
     def _on_browse_folder(self):
         chosen = filedialog.askdirectory(
             title="Select Folder to Organize",
             initialdir=self.folder_path_var.get() or str(Path.home())
         )
         if chosen:
-            self.folder_path_var.set(chosen)
-            self.status_var.set(f"Selected folder: {chosen}")
-            self.log_message(f"Selected target directory: {chosen}", "info")
+            self._apply_selected_folder(chosen)
 
     def _on_clear_status(self):
         self.log_text.delete("1.0", tk.END)
@@ -911,6 +947,7 @@ class FileOrganizerGUI:
         state = tk.DISABLED if running else tk.NORMAL
         self.organize_btn.config(state=state)
         self.browse_btn.config(state=state)
+        self.recent_btn.config(state=state)
         self.clear_btn.config(state=state)
         self.undo_btn.config(state=state)
         self.open_btn.config(state=state)

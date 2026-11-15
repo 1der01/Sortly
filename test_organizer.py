@@ -26,6 +26,27 @@ from organizer import (
 )
 
 
+class TestConfigPersistence(unittest.TestCase):
+    def test_recent_folders_are_tracked_and_kept_unique(self):
+        from config import ConfigManager
+        cfg = ConfigManager()
+        cfg.preferences.recent_folders = []
+
+        folder_1 = str(Path(tempfile.mkdtemp(prefix="sortly-recent-1-")))
+        folder_2 = str(Path(tempfile.mkdtemp(prefix="sortly-recent-2-")))
+
+        cfg.add_recent_folder(folder_1)
+        cfg.add_recent_folder(folder_1)
+        cfg.add_recent_folder(folder_2)
+
+        recent = cfg.get_recent_folders()
+        self.assertEqual(recent[0], str(Path(folder_2).resolve()))
+        self.assertEqual(len(recent), 2)
+
+        cfg.clear_recent_folders()
+        self.assertEqual(cfg.get_recent_folders(), [])
+
+
 class TestFileOrganizer(unittest.TestCase):
 
     def setUp(self):

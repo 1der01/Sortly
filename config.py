@@ -83,8 +83,8 @@ class ConfigManager:
     
     def get_recent_folders(self) -> List[str]:
         """Get list of recent folders."""
-        return self.preferences.recent_folders.copy()
-    
+        return [str(Path(folder).resolve()) for folder in self.preferences.recent_folders if Path(folder).exists()]
+
     def clear_recent_folders(self) -> None:
         """Clear the recent folders list."""
         self.preferences.recent_folders = []
