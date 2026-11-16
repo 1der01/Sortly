@@ -545,6 +545,13 @@ class FileOrganizerGUI:
         )
         self.recent_btn.pack(side=tk.RIGHT, padx=(0, 8))
 
+        self.ignore_btn = ttk.Button(
+            folder_row,
+            text="Ignore Types",
+            command=self._show_ignored_extensions_manager
+        )
+        self.ignore_btn.pack(side=tk.RIGHT, padx=(0, 8))
+
         self.categories_btn = ttk.Button(
             folder_row,
             text="Categories",
@@ -676,6 +683,7 @@ class FileOrganizerGUI:
         # Attach visual contextual tooltips to main control buttons as well
         ContextTooltip(self.browse_btn, lambda: self._get_context("browse"))
         ContextTooltip(self.categories_btn, lambda: self._get_context("browse"))
+        ContextTooltip(self.ignore_btn, lambda: self._get_context("browse"))
         ContextTooltip(self.organize_btn, lambda: self._get_context("organize"))
         ContextTooltip(self.dry_run_check, lambda: self._get_context("dry_run"))
         ContextTooltip(self.date_check, lambda: self._get_context("group_date"))
@@ -1053,6 +1061,71 @@ class FileOrganizerGUI:
 
         dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
 
+    def _show_ignored_extensions_manager(self):
+        if not HAS_TKINTER:
+            messagebox.showwarning("Ignore Types", "Ignored extension management is only available in the desktop GUI.")
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Sortly Ignored Extensions")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.geometry("400x320")
+
+        tk.Label(dialog, text="Add extension (without dot)", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=12, pady=(10, 0))
+        ext_var = tk.StringVar()
+        tk.Entry(dialog, textvariable=ext_var, font=("Consolas", 10)).pack(fill=tk.X, padx=12, pady=(4, 10))
+
+        list_frame = ttk.LabelFrame(dialog, text=" Ignored Extensions ", padding="8 8 8 8")
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
+
+        ignored_list = tk.Listbox(list_frame, height=10, font=("Consolas", 9))
+        ignored_list.pack(fill=tk.BOTH, expand=True)
+
+        def refresh_list():
+            ignored_list.delete(0, tk.END)
+            config_path = self._get_sortly_config_path()
+            cfg, _ = load_sortly_config(custom_path=config_path)
+            for ext in cfg.get_ignored_extensions():
+                ignored_list.insert(tk.END, ext)
+
+        def add_ignored_extension():
+            value = ext_var.get().strip().lstrip(".").lower()
+            if not value:
+                messagebox.showerror("Extension Required", "Enter an extension such as tmp, part, or download.")
+                return
+            config_path = self._get_sortly_config_path()
+            cfg, _ = load_sortly_config(custom_path=config_path)
+            if cfg.add_ignored_extension(value):
+                save_sortly_config(cfg, config_path)
+                self.log_message(f"Ignored extension '{value}' added to config.", "success")
+            else:
+                self.log_message(f"Ignored extension '{value}' was already present.", "info")
+            ext_var.set("")
+            refresh_list()
+
+        def remove_ignored_extension():
+            selection = ignored_list.curselection()
+            if not selection:
+                messagebox.showwarning("No Selection", "Choose an ignored extension to remove.")
+                return
+            value = ignored_list.get(selection[0]).strip().lower()
+            config_path = self._get_sortly_config_path()
+            cfg, _ = load_sortly_config(custom_path=config_path)
+            if cfg.remove_ignored_extension(value):
+                save_sortly_config(cfg, config_path)
+                self.log_message(f"Ignored extension '{value}' removed from config.", "warning")
+            refresh_list()
+
+        button_row = ttk.Frame(dialog)
+        button_row.pack(fill=tk.X, padx=12, pady=(0, 12))
+        ttk.Button(button_row, text="Add", command=add_ignored_extension).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(button_row, text="Remove Selected", command=remove_ignored_extension).pack(side=tk.LEFT)
+        ttk.Button(button_row, text="Close", command=dialog.destroy).pack(side=tk.RIGHT)
+
+        refresh_list()
+        dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
+
     def _on_browse_folder(self):
         chosen = filedialog.askdirectory(
             title="Select Folder to Organize",
@@ -1077,6 +1150,7 @@ class FileOrganizerGUI:
         self.browse_btn.config(state=state)
         self.recent_btn.config(state=state)
         self.categories_btn.config(state=state)
+        self.ignore_btn.config(state=state)
         self.clear_btn.config(state=state)
         self.undo_btn.config(state=state)
         self.open_btn.config(state=state)

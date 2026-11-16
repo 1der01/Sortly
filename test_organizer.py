@@ -60,6 +60,25 @@ class TestConfigPersistence(unittest.TestCase):
         self.assertEqual(loaded_cfg.get_category("csv"), "Receipts")
         self.assertIn("Receipts", loaded_cfg.get_all_categories())
 
+    def test_ignored_extensions_round_trip_and_management(self):
+        from categories import SortlyConfig, load_sortly_config, save_sortly_config
+
+        cfg = SortlyConfig()
+        self.assertTrue(cfg.add_ignored_extension("tmp"))
+        self.assertFalse(cfg.add_ignored_extension(".tmp"))
+        self.assertEqual(cfg.get_ignored_extensions(), ["tmp"])
+        self.assertTrue(cfg.is_ignored_extension("TMP"))
+        self.assertTrue(cfg.remove_ignored_extension("tmp"))
+        self.assertFalse(cfg.remove_ignored_extension("tmp"))
+
+        config_path = Path(tempfile.mkdtemp(prefix="sortly-ignored-")) / "sortly_config.json"
+        cfg.add_ignored_extension("download")
+        save_sortly_config(cfg, config_path)
+
+        loaded_cfg, source = load_sortly_config(custom_path=config_path)
+        self.assertEqual(source, config_path)
+        self.assertIn("download", loaded_cfg.get_ignored_extensions())
+
 
 class TestFileOrganizer(unittest.TestCase):
 

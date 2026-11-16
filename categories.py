@@ -127,6 +127,31 @@ class SortlyConfig:
         for ext in self._normalize_extensions(ignored_extensions):
             self.ignored_extensions.add(ext)
 
+    def add_ignored_extension(self, extension: str) -> bool:
+        """Add an ignored extension if it is not already tracked."""
+        cleaned = self._normalize_extensions([extension])
+        if not cleaned:
+            return False
+        ext = cleaned[0]
+        if ext in self.ignored_extensions:
+            return False
+        self.ignored_extensions.add(ext)
+        return True
+
+    def remove_ignored_extension(self, extension: str) -> bool:
+        """Remove an ignored extension, returning True if it existed."""
+        cleaned = self._normalize_extensions([extension])
+        if not cleaned:
+            return False
+        ext = cleaned[0]
+        if ext not in self.ignored_extensions:
+            return False
+        self.ignored_extensions.remove(ext)
+        return True
+
+    def get_ignored_extensions(self) -> List[str]:
+        return sorted(self.ignored_extensions)
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "categories": {cat: list(exts) for cat, exts in self.mappings.items() if cat != DEFAULT_CATEGORY},
