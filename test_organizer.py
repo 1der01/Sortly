@@ -79,6 +79,14 @@ class TestConfigPersistence(unittest.TestCase):
         self.assertEqual(source, config_path)
         self.assertIn("download", loaded_cfg.get_ignored_extensions())
 
+    def test_date_format_is_round_trippable(self):
+        from categories import SortlyConfig
+
+        cfg = SortlyConfig(date_format="%Y-%m")
+        self.assertEqual(cfg.get_date_format(), "%Y-%m")
+        cfg.set_date_format("%Y/%m")
+        self.assertEqual(cfg.get_date_format(), "%Y/%m")
+
 
 class TestFileOrganizer(unittest.TestCase):
 

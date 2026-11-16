@@ -152,6 +152,17 @@ class SortlyConfig:
     def get_ignored_extensions(self) -> List[str]:
         return sorted(self.ignored_extensions)
 
+    def set_date_format(self, value: str) -> str:
+        """Set the date grouping format used for YYYY-MM subfolders."""
+        cleaned = str(value or "").strip()
+        if not cleaned:
+            raise ValueError("Date format cannot be empty.")
+        self.date_format = cleaned
+        return self.date_format
+
+    def get_date_format(self) -> str:
+        return self.date_format
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "categories": {cat: list(exts) for cat, exts in self.mappings.items() if cat != DEFAULT_CATEGORY},
