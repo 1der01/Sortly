@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from config import get_config
 from organizer import (
     OrganizationSummary,
     get_undo_journal_path,
@@ -26,7 +27,7 @@ from organizer import (
     organize_folder,
     undo_organization,
 )
-from categories import load_sortly_config
+from categories import DEFAULT_CATEGORY_MAPPINGS, SortlyConfig, load_sortly_config, save_sortly_config
 
 # Check if GUI (tkinter) is available
 HAS_TKINTER = False
@@ -544,6 +545,13 @@ class FileOrganizerGUI:
         )
         self.recent_btn.pack(side=tk.RIGHT, padx=(0, 8))
 
+        self.categories_btn = ttk.Button(
+            folder_row,
+            text="Categories",
+            command=self._show_category_manager
+        )
+        self.categories_btn.pack(side=tk.RIGHT, padx=(0, 8))
+
         self.browse_btn = ttk.Button(
             folder_row,
             text="Browse Folder...",
@@ -667,6 +675,7 @@ class FileOrganizerGUI:
 
         # Attach visual contextual tooltips to main control buttons as well
         ContextTooltip(self.browse_btn, lambda: self._get_context("browse"))
+        ContextTooltip(self.categories_btn, lambda: self._get_context("browse"))
         ContextTooltip(self.organize_btn, lambda: self._get_context("organize"))
         ContextTooltip(self.dry_run_check, lambda: self._get_context("dry_run"))
         ContextTooltip(self.date_check, lambda: self._get_context("group_date"))
@@ -925,6 +934,125 @@ class FileOrganizerGUI:
 
         self.recent_menu.post(self.recent_btn.winfo_rootx(), self.recent_btn.winfo_rooty() + self.recent_btn.winfo_height())
 
+    def _get_sortly_config_path(self) -> Path:
+        folder_str = self.folder_path_var.get().strip()
+        if folder_str:
+            folder_path = Path(folder_str)
+            if folder_path.exists() and folder_path.is_dir():
+                return folder_path / "sortly_config.json"
+        return Path.cwd() / "sortly_config.json"
+
+    def _get_custom_categories(self) -> Dict[str, List[str]]:
+        config_path = self._get_sortly_config_path()
+        cfg, _ = load_sortly_config(custom_path=config_path)
+        custom = {}
+        for category, extensions in cfg.mappings.items():
+            if category in DEFAULT_CATEGORY_MAPPINGS or category == "Others":
+                continue
+            custom[category] = list(extensions)
+        return dict(sorted(custom.items()))
+
+    def _show_category_manager(self):
+        if not HAS_TKINTER:
+            messagebox.showwarning("Categories", "Custom category editing is only available in the desktop GUI.")
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Sortly Categories")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.geometry("500x420")
+
+        tk.Label(dialog, text="Category name", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=12, pady=(10, 0))
+        category_var = tk.StringVar()
+        category_entry = tk.Entry(dialog, textvariable=category_var, font=("Consolas", 10))
+        category_entry.pack(fill=tk.X, padx=12, pady=(4, 8))
+
+        tk.Label(dialog, text="Extensions (comma-separated)", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=12)
+        extensions_var = tk.StringVar()
+        extensions_entry = tk.Entry(dialog, textvariable=extensions_var, font=("Consolas", 10))
+        extensions_entry.pack(fill=tk.X, padx=12, pady=(4, 8))
+
+        list_frame = ttk.LabelFrame(dialog, text=" Custom Categories ", padding="8 8 8 8")
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
+
+        category_list = tk.Listbox(list_frame, height=10, font=("Consolas", 9))
+        category_list.pack(fill=tk.BOTH, expand=True)
+
+        def refresh_list():
+            category_list.delete(0, tk.END)
+            for name, extensions in self._get_custom_categories().items():
+                category_list.insert(tk.END, f"{name}: {', '.join(extensions)}")
+
+        def populate_selection(event=None):
+            selection = category_list.curselection()
+            if not selection:
+                return
+            label = category_list.get(selection[0])
+            name, _, ext_text = label.partition(":")
+            category_var.set(name.strip())
+            extensions_var.set(ext_text.strip().lstrip(", "))
+
+        category_list.bind("<<ListboxSelect>>", populate_selection)
+        refresh_list()
+
+        def save_category():
+            name = category_var.get().strip()
+            if not name:
+                messagebox.showerror("Category Required", "Please enter a category name.")
+                return
+            if name in DEFAULT_CATEGORY_MAPPINGS:
+                messagebox.showerror("Read-only Category", "Built-in categories cannot be edited from this panel.")
+                return
+
+            extensions = [
+                ext.strip().lstrip(".").lower()
+                for ext in extensions_var.get().split(",")
+                if ext.strip()
+            ]
+            if not extensions:
+                messagebox.showerror("Extensions Required", "Add at least one file extension, such as pdf, csv, or docx.")
+                return
+
+            config_path = self._get_sortly_config_path()
+            cfg, _ = load_sortly_config(custom_path=config_path)
+            cfg.add_category(name, extensions, overwrite=True)
+            save_sortly_config(cfg, config_path)
+            self.config_manager.add_custom_category(name, extensions)
+            refresh_list()
+            self.log_message(f"Saved custom category rules for '{name}' to {config_path}", "success")
+
+        def remove_category():
+            selection = category_list.curselection()
+            if not selection:
+                messagebox.showwarning("No Selection", "Select a custom category to remove.")
+                return
+            label = category_list.get(selection[0])
+            name, _, _ = label.partition(":")
+            name = name.strip()
+            if not name:
+                return
+
+            config_path = self._get_sortly_config_path()
+            cfg, _ = load_sortly_config(custom_path=config_path)
+            if cfg.remove_category(name):
+                save_sortly_config(cfg, config_path)
+                self.config_manager.remove_custom_category(name)
+                refresh_list()
+                category_var.set("")
+                extensions_var.set("")
+                self.log_message(f"Removed custom category '{name}' from configuration.", "warning")
+            else:
+                messagebox.showwarning("Not removable", "Only custom categories can be removed here.")
+
+        button_row = ttk.Frame(dialog)
+        button_row.pack(fill=tk.X, padx=12, pady=(0, 12))
+        ttk.Button(button_row, text="Save Category", command=save_category).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(button_row, text="Remove Selected", command=remove_category).pack(side=tk.LEFT)
+        ttk.Button(button_row, text="Close", command=dialog.destroy).pack(side=tk.RIGHT)
+
+        dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
+
     def _on_browse_folder(self):
         chosen = filedialog.askdirectory(
             title="Select Folder to Organize",
@@ -948,6 +1076,7 @@ class FileOrganizerGUI:
         self.organize_btn.config(state=state)
         self.browse_btn.config(state=state)
         self.recent_btn.config(state=state)
+        self.categories_btn.config(state=state)
         self.clear_btn.config(state=state)
         self.undo_btn.config(state=state)
         self.open_btn.config(state=state)

@@ -46,6 +46,20 @@ class TestConfigPersistence(unittest.TestCase):
         cfg.clear_recent_folders()
         self.assertEqual(cfg.get_recent_folders(), [])
 
+    def test_sortly_config_file_round_trips_custom_categories(self):
+        from categories import SortlyConfig, load_sortly_config, save_sortly_config
+
+        cfg = SortlyConfig()
+        cfg.add_category("Receipts", ["pdf", "csv"])
+
+        config_path = Path(tempfile.mkdtemp(prefix="sortly-config-")) / "sortly_config.json"
+        save_sortly_config(cfg, config_path)
+
+        loaded_cfg, source = load_sortly_config(custom_path=config_path)
+        self.assertEqual(source, config_path)
+        self.assertEqual(loaded_cfg.get_category("csv"), "Receipts")
+        self.assertIn("Receipts", loaded_cfg.get_all_categories())
+
 
 class TestFileOrganizer(unittest.TestCase):
 

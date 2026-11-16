@@ -34,7 +34,7 @@ Crucially, **reliability and file safety are prioritized**:
 ## 2. Features
 
 - **Folder Selection**: Easily browse and select any directory on your system, and reuse recent folders from a quick-access menu.
-- **Custom Category Rules**: Add or override category mappings with a local `sortly_config.json` file for project-specific organization.
+- **Custom Category Rules**: Add or override category mappings from the desktop app or by editing a local `sortly_config.json` file for project-specific organization.
 - **Date-Based Grouping**: Optionally sort into `Documents/2026-11/` style month folders while keeping the primary category structure intact.
 - **Categorization Engine**: Automatically classifies files into 7 well-defined categories:
   - **Documents**: `PDF`, `DOC`, `DOCX`, `TXT`, `XLSX`, `XLS`, `PPT`, `PPTX`, `CSV`, `RTF`, `ODT`, `MD`

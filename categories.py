@@ -185,6 +185,15 @@ class SortlyConfig:
 _GLOBAL_CONFIG = SortlyConfig()
 
 
+def save_sortly_config(config: SortlyConfig, path: Optional[Path] = None) -> Path:
+    """Persist a SortlyConfig instance to a sortly_config.json file."""
+    target = Path(path) if path else Path.cwd() / "sortly_config.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with open(target, "w", encoding="utf-8") as f:
+        json.dump(config.to_dict(), f, indent=2)
+    return target
+
+
 def load_sortly_config(custom_path: Optional[Path] = None, search_folder: Optional[Path] = None) -> Tuple[SortlyConfig, Optional[Path]]:
     """
     Attempts to load a sortly_config.json configuration file.
